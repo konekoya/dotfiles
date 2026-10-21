@@ -1,0 +1,47 @@
+# Git Aliases
+
+alias gs="git status"
+alias gst="git status"
+alias gl="git pull"
+alias gco="git checkout"
+_git_alias_base_branch() {
+  if git show-ref --verify --quiet "refs/heads/$2"; then
+    printf '%s\n' "$2"
+  elif git show-ref --verify --quiet "refs/heads/$3"; then
+    printf '%s\n' "$3"
+  else
+    printf "%s: neither '%s' nor '%s' branch found\n" "$1" "$2" "$3" >&2
+    return 1
+  fi
+}
+unalias gcm 2>/dev/null
+gcm() {
+  local base_branch
+  base_branch=$(_git_alias_base_branch gcm master main) || return 1
+  git checkout "$base_branch"
+}
+unalias gcd 2>/dev/null
+gcd() {
+  local base_branch
+  base_branch=$(_git_alias_base_branch gcd develop dev) || return 1
+  git checkout "$base_branch"
+}
+unalias grm 2>/dev/null
+grm() {
+  local base_branch
+  base_branch=$(_git_alias_base_branch grm master main) || return 1
+  git rebase "$base_branch" "$@"
+}
+unalias grd 2>/dev/null
+grd() {
+  local base_branch
+  base_branch=$(_git_alias_base_branch grd develop dev) || return 1
+  git rebase "$base_branch" "$@"
+}
+alias ga="git add ."
+alias gc="git commit -m"
+alias gp="git push"
+alias gg="git log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit"
+alias gb="git branch -a"
+alias gd="git diff"
+alias gcl="git clone"

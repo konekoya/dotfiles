@@ -1,0 +1,42 @@
+#!/bin/bash
+# Description: Source to load values from alias/.env into the current shell, unexported
+# Usage: source "$(command -v local-env)" CLICKUP_API_TOKEN
+#
+# For agent skills and ad-hoc snippets that need a token the shell no longer exports.
+# Sourcing sets each NAME as a plain, non-exported variable in the calling shell (Bash or
+# Zsh) and prints nothing. Values already set in the environment win. Executing this file
+# instead of sourcing it does nothing useful by design: it never prints a value.
+
+if [ -n "${BASH_VERSION:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  echo 'local-env must be sourced, not executed:' >&2
+  echo '  source "$(command -v local-env)" NAME [NAME...]' >&2
+  exit 2
+fi
+
+if [ -n "${ZSH_VERSION:-}" ]; then
+  eval '_local_env_self="${(%):-%x}"'
+else
+  _local_env_self="${BASH_SOURCE[0]}"
+fi
+_local_env_lib="$(cd "$(dirname "$_local_env_self")/../lib" && pwd)/local-env.sh"
+unset _local_env_self
+
+if [ ! -f "$_local_env_lib" ]; then
+  unset _local_env_lib
+  echo "local-env: cannot find lib/local-env.sh next to this script." >&2
+  return 1
+fi
+
+# shellcheck source=../lib/local-env.sh
+source "$_local_env_lib"
+unset _local_env_lib
+
+if [ "$#" -eq 0 ]; then
+  echo 'Usage: source "$(command -v local-env)" NAME [NAME...]' >&2
+  return 2
+fi
+
+if ! local_env_load "$@"; then
+  echo "local-env: invalid variable name; use letters, digits, and underscores." >&2
+  return 2
+fi

@@ -1,0 +1,28 @@
+# Per-machine zsh overrides. install.sh copies this to zsh/.zshrc.local when it
+# is missing; that copy is NOT tracked by git. Loaded before oh-my-zsh and starship.
+# Anything that must run after the shared setup goes in ~/.zshrc below the
+# `source ~/dotfiles/zsh/.zshrc.shared` line instead.
+
+# Extra oh-my-zsh plugins on top of the shared set.
+# DOTFILES_EXTRA_PLUGINS=(docker kubectl)
+
+# Fallback oh-my-zsh theme (only visible when starship is not installed).
+# ZSH_THEME="agnoster"
+
+# Use a different starship config on this machine than the shared zsh/starship.toml.
+# export STARSHIP_CONFIG="$HOME/.config/starship.work.toml"
+
+# Python version management (optional)
+#
+# pyenv is installed by Brewfile but is NOT initialized automatically.
+# Enable the following only if you need per-project Python versions.
+# Without initialization, pyenv-managed versions will not automatically
+# take precedence over the system/Homebrew Python.
+#
+# if command -v pyenv >/dev/null 2>&1; then
+#   eval "$(pyenv init - zsh)"
+# fi
+
+# Machine-specific environment.
+# export SOPS_AGE_KEY_FILE=~/.age/keys.txt
+# export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"

@@ -1,0 +1,45 @@
+#!/bin/bash
+# Description: Generate a valid Taiwan 統一編號 (Unified Business Number)
+
+WEIGHTS=(1 2 1 2 1 2 4 1)
+COUNT=1
+
+while getopts "n:" opt; do
+  case $opt in
+    n) COUNT="$OPTARG" ;;
+    *) echo "Usage: gen-tax-id [-n count]" >&2; exit 1 ;;
+  esac
+done
+
+generate_one() {
+  local digits=()
+  local i product partial=0 r candidates last result
+
+  for i in {0..6}; do
+    digits+=($((RANDOM % 10)))
+  done
+
+  for i in {0..6}; do
+    product=$(( digits[i] * WEIGHTS[i] ))
+    partial=$(( partial + product / 10 + product % 10 ))
+  done
+
+  candidates=()
+  r=$(( (5 - partial % 5) % 5 ))
+  candidates+=("$r" "$(( r + 5 ))")
+
+  if (( digits[6] == 7 )); then
+    r=$(( (5 - (partial + 1) % 5) % 5 ))
+    candidates+=("$r" "$(( r + 5 ))")
+  fi
+
+  last=${candidates[$((RANDOM % ${#candidates[@]}))]}
+
+  result=""
+  for d in "${digits[@]}"; do result="${result}${d}"; done
+  echo "${result}${last}"
+}
+
+for (( i = 0; i < COUNT; i++ )); do
+  generate_one
+done

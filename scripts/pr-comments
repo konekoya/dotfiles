@@ -1,0 +1,131 @@
+#!/bin/bash
+# Description: Fetch and display PR comment threads for the current branch
+# Usage: pr-comments [PR_ID]
+
+set -euo pipefail
+
+for cmd in jq curl; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "❌ '$cmd' is required. Install with: brew install $cmd"
+    exit 1
+  fi
+done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../lib/azure-devops.sh"
+source "$SCRIPT_DIR/../lib/http.sh"
+source "$SCRIPT_DIR/../lib/local-env.sh"
+
+# ── Resolve Azure DevOps repository context ──────────────────────────
+if ! ado_resolve_repo_context; then
+  echo "❌ ${ADO_CONTEXT_ERROR}"
+  exit 1
+fi
+ORG_PATH="$ADO_ORG_PATH"
+PROJECT_PATH="$ADO_PROJECT_PATH"
+REPO_PATH="$ADO_REPO_PATH"
+
+# ── Auth ─────────────────────────────────────────────────────────────
+if ! ado_get_auth_header; then
+  echo "❌ ${ADO_AUTH_ERROR}"
+  exit 1
+fi
+AUTH_HEADER="$ADO_AUTH_HEADER"
+
+# ── Resolve PR ID ────────────────────────────────────────────────────
+PR_ID="${1:-}"
+
+if [ -z "$PR_ID" ]; then
+  BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+  if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ]; then
+    echo "❌ Not on a named branch. Pass a PR ID: pr-comments <PR_ID>"
+    exit 1
+  fi
+
+  # URL-encode branch name (handles #, spaces, and other special chars)
+  BRANCH_ENCODED=$(jq -rn --arg b "$BRANCH" '$b | @uri')
+
+  PR_ID=$(http_json -H "$AUTH_HEADER" \
+    "https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_apis/git/repositories/${REPO_PATH}/pullrequests?searchCriteria.sourceRefName=refs/heads/${BRANCH_ENCODED}&searchCriteria.status=active&api-version=7.1" \
+    | jq -r '.value[0].pullRequestId // empty')
+
+  if [ -z "$PR_ID" ]; then
+    echo "❌ No open PR found for branch '${BRANCH}'. Pass a PR ID: pr-comments <PR_ID>"
+    exit 1
+  fi
+fi
+
+# ── Fetch PR metadata ────────────────────────────────────────────────
+PR_META=$(http_json -H "$AUTH_HEADER" \
+  "https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_apis/git/repositories/${REPO_PATH}/pullrequests/${PR_ID}?api-version=7.1")
+
+PR_TITLE=$(echo "$PR_META" | jq -r '.title')
+PR_AUTHOR=$(echo "$PR_META" | jq -r '.createdBy.displayName')
+PR_SOURCE=$(echo "$PR_META" | jq -r '.sourceRefName' | sed 's|refs/heads/||')
+PR_TARGET=$(echo "$PR_META" | jq -r '.targetRefName' | sed 's|refs/heads/||')
+
+# ── Fetch comment threads ────────────────────────────────────────────
+THREADS=$(http_json -H "$AUTH_HEADER" \
+  "https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_apis/git/repositories/${REPO_PATH}/pullrequests/${PR_ID}/threads?api-version=7.1")
+
+THREAD_COUNT=$(echo "$THREADS" | jq '[.value[] | select(.isDeleted != true and (.comments | map(select(.isDeleted != true and .commentType != "system")) | length) > 0)] | length')
+
+# ── Display ──────────────────────────────────────────────────────────
+echo ""
+echo "💬 PR #${PR_ID}: ${PR_TITLE}"
+echo "   ${PR_SOURCE} → ${PR_TARGET}  |  👤 ${PR_AUTHOR}"
+echo "   🔗 https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_git/${REPO_PATH}/pullrequest/${PR_ID}"
+echo "   ${THREAD_COUNT} comment thread(s)"
+echo "═══════════════════════════════════════════════════════════════"
+
+echo "$THREADS" | jq -c '
+  .value[]
+  | select(
+      .isDeleted != true
+      and (.comments | map(select(.isDeleted != true and .commentType != "system")) | length) > 0
+    )
+' | while IFS= read -r thread; do
+  STATUS=$(echo "$thread" | jq -r '.status // "unknown"')
+  FILE=$(echo "$thread" | jq -r '.threadContext.filePath // ""')
+  LINE_START=$(echo "$thread" | jq -r '.threadContext.rightFileStart.line // .threadContext.leftFileStart.line // ""')
+  LINE_END=$(echo "$thread"   | jq -r '.threadContext.rightFileEnd.line   // .threadContext.leftFileEnd.line   // ""')
+
+  # Status icon
+  case "$STATUS" in
+    active)   STATUS_ICON="🔴 active"   ;;
+    fixed)    STATUS_ICON="✅ fixed"    ;;
+    resolved) STATUS_ICON="✅ resolved" ;;
+    wontFix)  STATUS_ICON="⏭️  wontFix"  ;;
+    closed)   STATUS_ICON="⚫ closed"   ;;
+    *)        STATUS_ICON="   $STATUS"  ;;
+  esac
+
+  echo ""
+  if [ -n "$FILE" ]; then
+    if [ -n "$LINE_START" ] && [ "$LINE_START" != "$LINE_END" ] && [ -n "$LINE_END" ]; then
+      echo "  📄 ${FILE}:${LINE_START}-${LINE_END}  [${STATUS_ICON}]"
+    elif [ -n "$LINE_START" ]; then
+      echo "  📄 ${FILE}:${LINE_START}  [${STATUS_ICON}]"
+    else
+      echo "  📄 ${FILE}  [${STATUS_ICON}]"
+    fi
+  else
+    echo "  📝 General comment  [${STATUS_ICON}]"
+  fi
+  echo "  ───────────────────────────────────────────────────────────"
+
+  echo "$thread" | jq -c '
+    .comments[]
+    | select(.isDeleted != true and .commentType != "system")
+  ' | while IFS= read -r comment; do
+    AUTHOR=$(echo "$comment" | jq -r '.author.displayName')
+    CONTENT=$(echo "$comment" | jq -r '.content')
+    echo "  👤 ${AUTHOR}"
+    # Indent each line of the comment body
+    echo "$CONTENT" | sed 's/^/     /'
+    echo ""
+  done
+done
+
+echo "═══════════════════════════════════════════════════════════════"
+echo ""

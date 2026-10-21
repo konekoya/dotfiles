@@ -1,0 +1,114 @@
+#!/bin/bash
+# Description: Make a repository-scoped Azure DevOps REST request with its selected profile
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../lib/azure-devops.sh"
+source "$SCRIPT_DIR/../lib/http.sh"
+source "$SCRIPT_DIR/../lib/local-env.sh"
+
+usage() {
+  echo "Usage: ado-rest context | GET|POST|PATCH|PUT|DELETE /_apis/... [JSON_BODY]" >&2
+}
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
+  usage
+  exit 2
+fi
+
+for cmd in jq curl; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "❌ '$cmd' is required. Install with: brew install $cmd" >&2
+    exit 1
+  fi
+done
+
+if [ "$1" = context ]; then
+  [ "$#" -eq 1 ] || { usage; exit 2; }
+  method=context
+else
+  [ "$#" -ge 2 ] || { usage; exit 2; }
+  method="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
+  api_path="$2"
+  body="${3-}"
+  case "$method" in
+    GET|POST|PATCH|PUT|DELETE) ;;
+    *) usage; exit 2 ;;
+  esac
+  case "$api_path" in
+    /_apis/*) ;;
+    *) echo "❌ Azure DevOps API paths must start with '/_apis/'." >&2; exit 2 ;;
+  esac
+  case "$api_path" in
+    *" "*|*\\*|*\#*|*$'\t'*|*$'\r'*|*$'\n'*|*://*|*/../*|*/..|*/./*)
+      echo "❌ Azure DevOps API path contains unsupported characters." >&2
+      exit 2
+      ;;
+  esac
+  lower_path="$(printf '%s' "$api_path" | tr '[:upper:]' '[:lower:]')"
+  case "$lower_path" in
+    *token=*|*key=*|*secret=*|*password=*|*authorization=*|*pat=*|*credential=*)
+      echo "❌ Credentials are not allowed in Azure DevOps API paths." >&2
+      exit 2
+      ;;
+  esac
+  if [ "$method" = GET ] && [ "$#" -eq 3 ]; then
+    echo "❌ GET requests do not accept a body." >&2
+    exit 2
+  fi
+  if { [ "$method" = POST ] || [ "$method" = PATCH ] || [ "$method" = PUT ]; } && [ "$#" -ne 3 ]; then
+    echo "❌ ${method} requests require a JSON body argument." >&2
+    exit 2
+  fi
+  if [ "$method" = DELETE ] && [ "$#" -eq 3 ] && ! printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
+    echo "❌ DELETE request body must be valid JSON." >&2
+    exit 2
+  fi
+  if { [ "$method" = POST ] || [ "$method" = PATCH ] || [ "$method" = PUT ]; } && ! printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
+    echo "❌ ${method} request body must be valid JSON." >&2
+    exit 2
+  fi
+fi
+
+if ! ado_resolve_repo_context; then
+  echo "❌ ${ADO_CONTEXT_ERROR}" >&2
+  exit 1
+fi
+if ! ado_get_auth_header; then
+  echo "❌ ${ADO_AUTH_ERROR}" >&2
+  exit 1
+fi
+
+if [ "$method" = context ]; then
+  jq -n \
+    --arg organization "$ADO_ORG" \
+    --arg project "$ADO_PROJECT" \
+    --arg repository "$ADO_REPO" \
+    --arg remote "$ADO_REMOTE_NAME" \
+    '{organization: $organization, project: $project, repository: $repository, remote: $remote}'
+  exit 0
+fi
+
+url="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}${api_path}"
+if [ "$method" = GET ]; then
+  response="$(http_request -H "$ADO_AUTH_HEADER" "$url")" || exit 1
+elif [ "$method" = DELETE ] && [ "$#" -eq 2 ]; then
+  response="$(http_request -X DELETE -H "$ADO_AUTH_HEADER" "$url")" || exit 1
+else
+  response="$(http_request -X "$method" \
+    -H "$ADO_AUTH_HEADER" \
+    -H "Content-Type: application/json" \
+    "$url" \
+    -d "$body")" || exit 1
+fi
+
+# Azure DevOps DELETE operations may return HTTP 204 with an empty response body.
+if [ -z "$response" ]; then
+  exit 0
+fi
+if ! printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
+  echo "❌ API request returned invalid JSON." >&2
+  exit 1
+fi
+printf '%s\n' "$response"

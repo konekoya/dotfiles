@@ -1,0 +1,26 @@
+# Get the physical ip address of this Mac (interface of the default route, ignoring VPN tunnels)
+ip() {
+  local iface
+  iface=$(netstat -rn -f inet | awk '$1 == "default" && $4 ~ /^en/ { print $4; exit }')
+  [ -n "$iface" ] || { echo "ip: no active network interface" >&2; return 1; }
+  ipconfig getifaddr "$iface"
+}
+
+# Show Wi-Fi connection details (airport is now a stub that only prints a deprecation warning; SSID is redacted without Location access)
+wifi() {
+  local dev
+  dev=$(networksetup -listallhardwareports | awk '/Hardware Port: Wi-Fi/ { getline; print $2; exit }')
+  [ -n "$dev" ] || { echo "wifi: no Wi-Fi interface found" >&2; return 1; }
+  echo "Interface: $dev"
+  system_profiler SPAirPortDataType 2>/dev/null | awk '
+    /Current Network Information:/ { show = 1; next }
+    show && /Other Local Wi-Fi Networks:/ { exit }
+    show && NF { sub(/^ +/, ""); if (!named) { sub(/:$/, ""); print "SSID: " $0; named = 1 } else print }
+  '
+}
+
+# Put mac to sleep
+alias bye="pmset sleepnow"
+
+# Spin up a local web server from this dir
+alias server='open http://localhost:8000 && python3 -m http.server 8000 --bind 127.0.0.1'

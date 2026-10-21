@@ -1,0 +1,5 @@
+source "${0:A:h}/.git_alias"
+source "${0:A:h}/.util_alias"
+if [[ -f "${0:A:h}/.user_alias" ]]; then
+  source "${0:A:h}/.user_alias"
+fi

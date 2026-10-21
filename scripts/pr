@@ -1,0 +1,161 @@
+#!/bin/bash
+# Description: List active Azure DevOps PRs created by you and assigned to you
+
+# List your active PRs across all projects in an Azure DevOps org
+# (same view as https://dev.azure.com/{org}/_pulls)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../lib/azure-devops.sh"
+source "$SCRIPT_DIR/../lib/http.sh"
+source "$SCRIPT_DIR/../lib/local-env.sh"
+
+for cmd in jq curl; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "❌ '$cmd' is required. Install with: brew install $cmd"
+    exit 1
+  fi
+done
+
+# ── Resolve organization from the selected repository or explicit profile ──
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if ! ado_resolve_repo_context; then
+    echo "❌ ${ADO_CONTEXT_ERROR}"
+    exit 1
+  fi
+  ORG="$ADO_ORG"
+  ORG_PATH="$ADO_ORG_PATH"
+else
+  local_env_load AZURE_DEVOPS_ORG AZURE_DEVOPS_PROFILE
+  ORG="${AZURE_DEVOPS_ORG:-}"
+  if [ -n "${AZURE_DEVOPS_PROFILE:-}" ]; then
+    if [ -z "$ORG" ]; then
+      ORG="$(ado_profile_value "$AZURE_DEVOPS_PROFILE" organization 2>/dev/null || true)"
+    fi
+    ADO_ORG="$ORG"
+    if ! ado_bind_profile "$AZURE_DEVOPS_PROFILE" "$ORG"; then
+      echo "❌ ${ADO_PROFILE_ERROR}"
+      exit 1
+    fi
+  fi
+  if [ -z "$ORG" ] || ! ado_valid_path_segment "$ORG"; then
+    echo "❌ Cannot determine org. Set AZURE_DEVOPS_ORG with a PAT, select AZURE_DEVOPS_PROFILE, or run inside an Azure DevOps repo."
+    exit 1
+  fi
+  ADO_ORG="$ORG"
+  ORG_PATH="$ORG"
+fi
+
+# ── Auth: PAT env var → az CLI ───────────────────────────────────────
+if ! ado_get_auth_header; then
+  echo "❌ ${ADO_AUTH_ERROR}"
+  exit 1
+fi
+AUTH_HEADER="$ADO_AUTH_HEADER"
+
+# ── Get current user ID ─────────────────────────────────────────────
+MY_ID=$(http_json -H "$AUTH_HEADER" \
+  "https://dev.azure.com/${ORG_PATH}/_apis/connectionData" \
+  | jq -r '.authenticatedUser.id // empty')
+
+if [ -z "$MY_ID" ]; then
+  echo "❌ Could not get user identity. Check your credentials."
+  exit 1
+fi
+
+# ── List all projects ────────────────────────────────────────────────
+PROJECTS=$(http_json -H "$AUTH_HEADER" \
+  "https://dev.azure.com/${ORG_PATH}/_apis/projects?\$top=200&api-version=7.1" \
+  | jq -r '.value[].name')
+
+if [ -z "$PROJECTS" ]; then
+  echo "❌ No projects found in org '${ORG}'."
+  exit 1
+fi
+
+# ── Helper: print a PR row ───────────────────────────────────────────
+print_pr() {
+  local pr="$1" project="$2"
+  local PR_ID TITLE AUTHOR SOURCE TARGET REPO_NAME REVIEWERS REPO_ID BUILD_INFO project_path
+  project_path=$(jq -rn --arg p "$project" '$p | @uri')
+
+  PR_ID=$(echo "$pr" | jq -r '.pullRequestId')
+  TITLE=$(echo "$pr" | jq -r '.title')
+  AUTHOR=$(echo "$pr" | jq -r '.createdBy.displayName')
+  SOURCE=$(echo "$pr" | jq -r '.sourceRefName' | sed 's|refs/heads/||')
+  TARGET=$(echo "$pr" | jq -r '.targetRefName' | sed 's|refs/heads/||')
+  REPO_NAME=$(echo "$pr" | jq -r '.repository.name')
+  REPO_ID=$(echo "$pr" | jq -r '.repository.id')
+  REVIEWERS=$(echo "$pr" | jq -r '[.reviewers[] | .displayName + (if .vote == 10 then " ✅" elif .vote == 5 then " 👍" elif .vote == -5 then " ⏳" elif .vote == -10 then " ❌" else "" end)] | join(", ")')
+
+  BUILD_INFO=$(http_json -H "$AUTH_HEADER" \
+    "https://dev.azure.com/${ORG_PATH}/${project_path}/_apis/git/repositories/${REPO_ID}/pullrequests/${PR_ID}/statuses?api-version=7.1" \
+    | jq -r '[.value // [] | sort_by(.creationDate) | reverse | unique_by(.context.name)[]
+      | (if .state == "succeeded" then "✅" elif .state == "failed" then "❌" elif .state == "pending" then "⏳" else "❓" end) + " " + .context.name]
+      | join(", ")')
+
+  echo ""
+  echo "  #${PR_ID}  ${TITLE}"
+  echo "  📂 ${project}/${REPO_NAME}  |  ${SOURCE} → ${TARGET}"
+  echo "  👤 ${AUTHOR}"
+  [ -n "$REVIEWERS" ] && echo "  👥 ${REVIEWERS}"
+  [ -n "$BUILD_INFO" ] && echo "  🔧 CI: ${BUILD_INFO}" || echo "  🔧 CI: —"
+  echo "  🔗 https://dev.azure.com/${ORG}/${project_path}/_git/${REPO_NAME}/pullrequest/${PR_ID}"
+}
+
+# ── Fetch PRs across all projects ────────────────────────────────────
+CREATED_PRS=""
+ASSIGNED_PRS=""
+
+while IFS= read -r project; do
+  project_path=$(jq -rn --arg p "$project" '$p | @uri')
+  API="https://dev.azure.com/${ORG_PATH}/${project_path}/_apis/git/pullrequests"
+
+  CREATED=$(http_json -H "$AUTH_HEADER" \
+    "${API}?searchCriteria.status=active&searchCriteria.creatorId=${MY_ID}&\$top=50&api-version=7.1")
+  CREATED_PRS+=$(echo "$CREATED" | jq -c --arg p "$project" '[.value[] | . + {_project: $p}] // []' 2>/dev/null)
+
+  ASSIGNED=$(http_json -H "$AUTH_HEADER" \
+    "${API}?searchCriteria.status=active&searchCriteria.reviewerId=${MY_ID}&\$top=50&api-version=7.1")
+  ASSIGNED_PRS+=$(echo "$ASSIGNED" | jq -c --arg p "$project" '[.value[] | . + {_project: $p}] // []' 2>/dev/null)
+done <<< "$PROJECTS"
+
+# Merge JSON arrays and deduplicate
+CREATED_LIST=$(echo "$CREATED_PRS" | jq -s 'add // []')
+ASSIGNED_LIST=$(echo "$ASSIGNED_PRS" | jq -s 'add // []')
+
+CREATED_COUNT=$(echo "$CREATED_LIST" | jq 'length')
+ASSIGNED_COUNT=$(echo "$ASSIGNED_LIST" | jq 'length')
+
+# ── Display: Created by me ───────────────────────────────────────────
+echo ""
+echo "📋 Created by me ($CREATED_COUNT)"
+echo "─────────────────────────────────────────────────────────────"
+
+if [ "$CREATED_COUNT" -eq 0 ]; then
+  echo "  (none)"
+else
+  echo "$CREATED_LIST" | jq -c '.[]' | while IFS= read -r pr; do
+    project=$(echo "$pr" | jq -r '._project')
+    print_pr "$pr" "$project"
+  done
+fi
+
+# ── Display: Assigned to me ──────────────────────────────────────────
+echo ""
+echo ""
+echo "👀 Assigned to me ($ASSIGNED_COUNT)"
+echo "─────────────────────────────────────────────────────────────"
+
+if [ "$ASSIGNED_COUNT" -eq 0 ]; then
+  echo "  (none)"
+else
+  echo "$ASSIGNED_LIST" | jq -c '.[]' | while IFS= read -r pr; do
+    project=$(echo "$pr" | jq -r '._project')
+    print_pr "$pr" "$project"
+  done
+fi
+
+echo ""
+echo "─────────────────────────────────────────────────────────────"
+echo "🔗 https://dev.azure.com/${ORG_PATH}/_pulls"

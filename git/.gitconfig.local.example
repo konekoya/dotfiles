@@ -1,0 +1,62 @@
+# Machine-local Git config, included by ~/.gitconfig (git/.gitconfig in dotfiles).
+#
+# install.sh copies this file to ~/.gitconfig.local on first run. That copy lives
+# outside the repository, so your identity never ends up in git history.
+# Uncomment and fill in your default identity.
+
+[user]
+	# name = Your Name
+	# email = you@example.com
+
+# Azure DevOps API profiles are non-secret routing data. PAT values stay in alias/.env.
+# Add a uniquely named profile for each company or personal organization. Select
+# exactly one per repository; the remote organization does not auto-select a profile.
+# Profile names start with a lowercase letter and use lowercase letters, digits, or
+# hyphens. Underscores are not allowed because they could collide in PAT names.
+# The profile organization is checked against the selected repository remote before any
+# REST request. In a repository, select a profile with:
+#   git config --local azure-devops.profile work-company-a
+# Select a non-origin remote with:
+#   git config --local azure-devops.remote azure
+# [azure-devops "work-company-a"]
+# 	organization = company-a
+# 	auth = pat
+# [azure-devops "work-company-b"]
+# 	organization = company-b
+# 	auth = pat
+# [azure-devops "personal"]
+# 	organization = personal-org
+# 	auth = pat
+#
+# The matching PAT variables are AZURE_DEVOPS_PAT_WORK_COMPANY_A,
+# AZURE_DEVOPS_PAT_WORK_COMPANY_B, and AZURE_DEVOPS_PAT_PERSONAL in alias/.env.
+# A mismatched organization fails before authentication or a REST request; no
+# other profile is tried. A successful PAT `ado-rest context` checks local setup,
+# not Azure DevOps acceptance; use a read-only GET to validate API access.
+# A profile using Azure CLI must pin the expected tenant, user, and user object ID;
+# scripts verify these and do not switch the CLI account or subscription.
+# [azure-devops "work-cli"]
+# 	organization = work-org
+# 	auth = azure-cli
+# 	tenant = replace-with-tenant-guid
+# 	user = replace-with-azure-cli-user-name
+# 	object-id = replace-with-user-object-guid
+
+# Optional: use a work Git commit identity only for your work organization.
+# install.sh also creates ~/.gitconfig.work from git/.gitconfig.work.example;
+# put the work identity there, then uncomment these rules. They match on the
+# repository's remote URL, so they need Git 2.36 or newer and a remote that
+# is already set.
+#
+# [includeIf "hasconfig:remote.*.url:https://dev.azure.com/work-org/**"]
+# 	path = ~/.gitconfig.work
+# [includeIf "hasconfig:remote.*.url:https://*@dev.azure.com/work-org/**"]
+# 	path = ~/.gitconfig.work
+# [includeIf "hasconfig:remote.*.url:git@ssh.dev.azure.com:v3/work-org/**"]
+# 	path = ~/.gitconfig.work
+# [includeIf "hasconfig:remote.*.url:ssh://ssh.dev.azure.com/v3/work-org/**"]
+# 	path = ~/.gitconfig.work
+# [includeIf "hasconfig:remote.*.url:ssh://*@ssh.dev.azure.com/v3/work-org/**"]
+# 	path = ~/.gitconfig.work
+# [includeIf "hasconfig:remote.*.url:https://work-org.visualstudio.com/**"]
+# 	path = ~/.gitconfig.work

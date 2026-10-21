@@ -1,0 +1,55 @@
+#!/bin/bash
+# Description: Append a cd alias for the current directory to .user_alias
+
+USER_ALIAS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/alias/.user_alias"
+CURRENT_DIR="$PWD"
+
+# Ensure .user_alias exists
+if [ -L "$USER_ALIAS" ] && [ ! -f "$USER_ALIAS" ]; then
+  echo "❌ .user_alias is not a working file; review it manually." >&2
+  exit 1
+elif [ ! -e "$USER_ALIAS" ]; then
+  (set -C; printf '%s\n' '# Per-machine custom aliases' > "$USER_ALIAS") || exit 1
+elif [ ! -f "$USER_ALIAS" ]; then
+  echo "❌ .user_alias is not a regular file; review it manually." >&2
+  exit 1
+fi
+
+echo "📂 Current directory: $CURRENT_DIR"
+echo ""
+read -rp "Enter alias name (or press Enter to cancel): " ALIAS_NAME
+
+# Cancel if empty
+if [ -z "$ALIAS_NAME" ]; then
+  echo "❌ Cancelled."
+  exit 0
+fi
+
+# Validate: no spaces or special chars
+if [[ ! "$ALIAS_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
+  echo "❌ Invalid alias name. Use letters, numbers, hyphens, or underscores only."
+  exit 1
+fi
+
+# Check if alias name already exists
+if grep -q "^alias ${ALIAS_NAME}=" "$USER_ALIAS" 2>/dev/null; then
+  echo "⚠️  Alias '$ALIAS_NAME' already exists in .user_alias:"
+  grep "^alias ${ALIAS_NAME}=" "$USER_ALIAS"
+  echo ""
+  read -rp "Overwrite? (y/N): " CONFIRM
+  if [[ "$CONFIRM" != [yY] ]]; then
+    echo "❌ Cancelled."
+    exit 0
+  fi
+  # Remove old entry
+  sed -i '' "/^alias ${ALIAS_NAME}=/d" "$USER_ALIAS" || exit 1
+fi
+
+# Escape both the cd argument and the alias value; neither is evaluated on load.
+printf -v ALIAS_COMMAND 'cd -- %q' "$CURRENT_DIR"
+printf -v ALIAS_LINE 'alias %s=%q' "$ALIAS_NAME" "$ALIAS_COMMAND"
+printf '%s\n' "$ALIAS_LINE" >> "$USER_ALIAS" || exit 1
+
+echo ""
+printf '✅ Added: %s\n' "$ALIAS_LINE"
+echo "   Run 'source ~/.zshrc' or open a new terminal to use it."

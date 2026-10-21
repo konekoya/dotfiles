@@ -1,0 +1,97 @@
+#!/bin/bash
+# Description: Open the current branch's PR in Chrome, or fall back to the repo (Azure DevOps or GitHub)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../lib/azure-devops.sh"
+source "$SCRIPT_DIR/../lib/http.sh"
+source "$SCRIPT_DIR/../lib/local-env.sh"
+
+# Tokens live in alias/.env and are loaded here, not exported by the interactive shell.
+local_env_load GITHUB_TOKEN
+
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+  echo "❌ Oops, this is not a git repo."
+  exit 1
+fi
+
+if ! ado_resolve_remote_context; then
+  echo "❌ ${ADO_REMOTE_ERROR}"
+  exit 1
+fi
+
+if [ "$ADO_REMOTE_PROVIDER" = azure ]; then
+  if ! ado_resolve_repo_context; then
+    echo "❌ ${ADO_CONTEXT_ERROR}"
+    exit 1
+  fi
+  PROVIDER="azure"
+  ORG="$ADO_ORG"
+  PROJECT="$ADO_PROJECT_PATH"
+  REPO="$ADO_REPO_PATH"
+elif [ "$ADO_REMOTE_PROVIDER" = github ]; then
+  PROVIDER="github"
+  OWNER="$GITHUB_OWNER"
+  REPO="$GITHUB_REPO"
+else
+  echo "❌ Selected Git remote is not a recognized Azure DevOps or GitHub repository."
+  exit 1
+fi
+
+# Build web URL
+if [ "$PROVIDER" = "azure" ]; then
+  REPO_URL="https://dev.azure.com/${ORG}/${PROJECT}/_git/${REPO}"
+else
+  REPO_URL="https://github.com/${OWNER}/${REPO}"
+fi
+
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
+
+# PR lookup is optional; errors retain the repository-page fallback.
+if [ -n "$BRANCH" ] && command -v jq >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+  AUTH_HEADER=""
+  if [ "$PROVIDER" = azure ]; then
+    if ado_get_auth_header; then
+      AUTH_HEADER="$ADO_AUTH_HEADER"
+    fi
+    if [ -n "$AUTH_HEADER" ]; then
+      ENCODED_REF=$(jq -rn --arg ref "refs/heads/$BRANCH" '$ref | @uri')
+      if PR_JSON=$(http_json -H "$AUTH_HEADER" \
+        "https://dev.azure.com/${ORG}/${PROJECT}/_apis/git/repositories/${REPO}/pullrequests?searchCriteria.sourceRefName=${ENCODED_REF}&searchCriteria.status=active&api-version=7.1") && \
+        PR_ID=$(printf '%s' "$PR_JSON" | jq -er '.value[0].pullRequestId | select(type == "number" and . > 0)' 2>/dev/null); then
+        if [ -n "$PR_ID" ]; then
+          PR_URL="${REPO_URL}/pullrequest/${PR_ID}"
+          echo "🔀 Opening PR #${PR_ID}: $PR_URL"
+          exec open -a "Google Chrome" "$PR_URL"
+        fi
+      fi
+    fi
+  else
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+      AUTH_HEADER="Authorization: Bearer $GITHUB_TOKEN"
+    elif command -v gh >/dev/null 2>&1; then
+      if TOKEN=$(gh auth token 2>/dev/null) && [ -n "$TOKEN" ]; then
+        AUTH_HEADER="Authorization: Bearer $TOKEN"
+      fi
+    fi
+    if [ -n "$AUTH_HEADER" ]; then
+      ENCODED_HEAD=$(jq -rn --arg head "${OWNER}:${BRANCH}" '$head | @uri')
+      if PR_JSON=$(http_json -H "$AUTH_HEADER" \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "https://api.github.com/repos/${OWNER}/${REPO}/pulls?head=${ENCODED_HEAD}&state=open&per_page=1") && \
+        PR_NUMBER=$(printf '%s' "$PR_JSON" | jq -er '.[0].number | select(type == "number" and . > 0)' 2>/dev/null); then
+        if [ -n "$PR_NUMBER" ]; then
+          PR_URL="${REPO_URL}/pull/${PR_NUMBER}"
+          echo "🔀 Opening PR #${PR_NUMBER}: $PR_URL"
+          exec open -a "Google Chrome" "$PR_URL"
+        fi
+      fi
+    fi
+  fi
+fi
+
+# No PR found (or no auth) — open the repo URL
+echo "🌐 Opening: $REPO_URL"
+open -a "Google Chrome" "$REPO_URL"

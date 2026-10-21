@@ -1,0 +1,61 @@
+#!/bin/bash
+# Description: Confirm before stopping and removing all Docker containers, including stopped containers
+
+usage() {
+  cat <<'EOF'
+Usage: docker-clean [-y|--yes] [-h|--help]
+
+List all containers on the current Docker daemon, including stopped containers,
+then ask before stopping and removing them. Use -y or --yes to skip confirmation.
+EOF
+}
+
+assume_yes=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -y|--yes) assume_yes=true ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+# Use one snapshot for both the preview and the IDs passed to stop and rm.
+if ! container_list=$(docker ps --all --no-trunc --format '{{.ID}}\t{{.Names}}\t{{.Status}}'); then
+  echo "Failed to list Docker containers." >&2
+  exit 1
+fi
+
+if [ -z "$container_list" ]; then
+  echo "No containers to remove."
+  exit 0
+fi
+
+containers=()
+while IFS=$'\t' read -r container_id _; do
+  containers+=("$container_id")
+done <<< "$container_list"
+
+echo "Containers to stop and remove (including stopped containers):"
+printf 'ID\tNAME\tSTATUS\n%s\n' "$container_list"
+
+if [ "$assume_yes" = false ]; then
+  printf 'Stop and remove these containers? [y/N] '
+  if ! read -r answer; then
+    echo "Cancelled."
+    exit 0
+  fi
+  case "$answer" in
+    [yY]|[yY][eE][sS]) ;;
+    *) echo "Cancelled."; exit 0 ;;
+  esac
+fi
+
+echo "Stopping and removing all containers..."
+docker stop "${containers[@]}" || exit 1
+docker rm "${containers[@]}" || exit 1
+echo "Done."

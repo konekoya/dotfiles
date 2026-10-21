@@ -1,0 +1,427 @@
+#!/bin/bash
+# Description: Safely clean up local branches whose upstreams are gone
+
+usage() {
+  cat <<'EOF'
+Usage: sync-branch [--dry-run] [--force] [--help]
+
+Refresh origin and inspect local branches whose configured upstreams are gone.
+Normal mode deletes only branches proven contained in origin/main, origin/master,
+or origin/develop. --force may delete unmerged candidates. Branches checked out
+in any worktree are always preserved.
+EOF
+}
+
+dry_run=false
+force=false
+show_help=false
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry_run=true ;;
+    --force) force=true ;;
+    --help|-h) show_help=true ;;
+    *)
+      echo "❌ Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+if [ "$show_help" = true ]; then
+  usage
+  exit 0
+fi
+
+# Color only on an interactive terminal, and honor https://no-color.org.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  c_reset=$'\033[0m'
+  c_bold=$'\033[1m'
+  c_dim=$'\033[2m'
+  c_red=$'\033[31m'
+  c_green=$'\033[32m'
+  c_yellow=$'\033[33m'
+  c_cyan=$'\033[36m'
+else
+  c_reset=""
+  c_bold=""
+  c_dim=""
+  c_red=""
+  c_green=""
+  c_yellow=""
+  c_cyan=""
+fi
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "❌ Not inside a Git working tree." >&2
+  exit 1
+fi
+
+if ! git remote | grep -Fxq origin; then
+  echo "❌ This repository has no 'origin' remote." >&2
+  exit 1
+fi
+
+echo "🔄 Fetching origin and pruning stale remote refs..."
+if ! git fetch origin --prune; then
+  echo "❌ Could not refresh remote refs from origin; no branches were changed." >&2
+  exit 1
+fi
+
+if ! git worktree list --porcelain -z >/dev/null 2>&1; then
+  echo "❌ Could not inspect Git worktrees; no branches were changed." >&2
+  exit 1
+fi
+
+if [ "$force" = true ]; then
+  echo "⚠️  --force is enabled: unmerged stale branches may be deleted."
+fi
+if [ "$dry_run" = true ]; then
+  echo "🔎 Dry run: no branches will be deleted."
+fi
+
+base_refs=()
+for base_name in main master develop; do
+  base_ref="refs/remotes/origin/$base_name"
+  if git show-ref --verify --quiet "$base_ref"; then
+    base_refs+=("$base_ref")
+  fi
+done
+
+candidate_branches=()
+while IFS=$'\t' read -r branch tracking; do
+  [ -n "$branch" ] || continue
+  if [ "$tracking" = "[gone]" ]; then
+    candidate_branches+=("$branch")
+  fi
+done < <(git for-each-ref --format='%(refname:strip=2)%09%(upstream:track)' refs/heads)
+
+worktree_branches=()
+worktree_paths=()
+worktree_path=""
+while IFS= read -r -d '' field; do
+  case "$field" in
+    "worktree "*) worktree_path="${field#worktree }" ;;
+    "branch refs/heads/"*)
+      worktree_branches+=("${field#branch refs/heads/}")
+      worktree_paths+=("$worktree_path")
+      ;;
+  esac
+done < <(git worktree list --porcelain -z)
+
+current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+current_worktree="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+
+restore_config_values() {
+  local key="$1"
+  shift
+  local value
+
+  git config --local --unset-all "$key" >/dev/null 2>&1 || true
+  for value in "$@"; do
+    git config --local --add "$key" "$value" || return 1
+  done
+}
+
+clear_pending_upstream_restore() {
+  pending_restore=false
+  pending_restore_branch=""
+  pending_remote_key=""
+  pending_merge_key=""
+  pending_remote_values=()
+  pending_merge_values=()
+}
+
+restore_pending_upstream() {
+  local restore_failed=false
+
+  [ "$pending_restore" = true ] || return 0
+
+  if git show-ref --verify --quiet "refs/heads/$pending_restore_branch"; then
+    if ! restore_config_values "$pending_remote_key" "${pending_remote_values[@]}"; then
+      restore_failed=true
+    fi
+    if ! restore_config_values "$pending_merge_key" "${pending_merge_values[@]}"; then
+      restore_failed=true
+    fi
+    if [ "$restore_failed" = true ]; then
+      echo "⚠️  Could not fully restore the upstream config for '$pending_restore_branch'." >&2
+      return 1
+    fi
+  fi
+
+  clear_pending_upstream_restore
+}
+
+handle_sync_branch_signal() {
+  local exit_status="$1"
+  restore_pending_upstream || true
+  exit "$exit_status"
+}
+
+delete_merged_branch() {
+  local branch="$1"
+  local base_label="$2"
+  local remote_key
+  local merge_key
+  local value
+  local pending_restore=false
+  local pending_restore_branch=""
+  local pending_remote_key=""
+  local pending_merge_key=""
+  local -a original_remote_values=()
+  local -a original_merge_values=()
+  local -a pending_remote_values=()
+  local -a pending_merge_values=()
+
+  remote_key="branch.$branch.remote"
+  merge_key="branch.$branch.merge"
+
+  while IFS= read -r value; do
+    original_remote_values+=("$value")
+  done < <(git config --local --get-all "$remote_key" 2>/dev/null || true)
+  while IFS= read -r value; do
+    original_merge_values+=("$value")
+  done < <(git config --local --get-all "$merge_key" 2>/dev/null || true)
+
+  trap 'restore_pending_upstream || true' EXIT
+  trap 'handle_sync_branch_signal 130' INT
+  trap 'handle_sync_branch_signal 143' TERM
+
+  pending_restore_branch="$branch"
+  pending_remote_key="$remote_key"
+  pending_merge_key="$merge_key"
+  pending_remote_values=("${original_remote_values[@]}")
+  pending_merge_values=("${original_merge_values[@]}")
+  pending_restore=true
+
+  # Point the stale branch at the proven base so git branch -d applies its
+  # normal merged-branch check against that base rather than the current HEAD.
+  if ! git branch --set-upstream-to="$base_label" -- "$branch" >/dev/null; then
+    if ! restore_pending_upstream; then
+      exit 1
+    fi
+    trap - EXIT INT TERM
+    return 1
+  fi
+
+  if git branch -d -- "$branch" >/dev/null; then
+    # The pending cleanup checks the ref: successful deletion leaves no branch
+    # whose temporary upstream needs restoring.
+    if ! restore_pending_upstream; then
+      exit 1
+    fi
+    trap - EXIT INT TERM
+    return 0
+  fi
+
+  # A concurrent change may make deletion fail after the temporary upstream
+  # update. Restore the original stale upstream configuration in that case.
+  if ! restore_pending_upstream; then
+    exit 1
+  fi
+  trap - EXIT INT TERM
+  return 1
+}
+
+echo ""
+printf '%sStale upstream branches:%s\n' "$c_bold" "$c_reset"
+
+if [ "${#candidate_branches[@]}" -eq 0 ]; then
+  printf '  %sNone found.%s\n' "$c_dim" "$c_reset"
+fi
+
+deleted_count=0
+would_delete_count=0
+would_force_delete_count=0
+skipped_unmerged_count=0
+skipped_worktree_count=0
+skipped_primary_count=0
+failed_count=0
+
+for branch in "${candidate_branches[@]}"; do
+  checked_out_paths=()
+  for index in "${!worktree_branches[@]}"; do
+    if [ "${worktree_branches[$index]}" = "$branch" ]; then
+      checked_out_paths+=("${worktree_paths[$index]}")
+    fi
+  done
+
+  if [ "$current_branch" = "$branch" ]; then
+    found_current_path=false
+    for checked_out_path in "${checked_out_paths[@]}"; do
+      if [ "$checked_out_path" = "$current_worktree" ]; then
+        found_current_path=true
+      fi
+    done
+    if [ "$found_current_path" = false ] && [ -n "$current_worktree" ]; then
+      checked_out_paths+=("$current_worktree")
+    fi
+  fi
+
+  if [ "${#checked_out_paths[@]}" -gt 0 ]; then
+    for checked_out_path in "${checked_out_paths[@]}"; do
+      printf '  🧱 %s%s%s\n     %schecked out in %q — skipped%s\n' "$c_cyan" "$branch" "$c_reset" "$c_dim" "$checked_out_path" "$c_reset"
+    done
+    skipped_worktree_count=$((skipped_worktree_count + 1))
+    continue
+  fi
+
+  case "$branch" in
+    main|master|develop)
+      printf '  🛡️  %s%s%s\n     %sprimary branch is protected — skipped%s\n' "$c_cyan" "$branch" "$c_reset" "$c_dim" "$c_reset"
+      skipped_primary_count=$((skipped_primary_count + 1))
+      continue
+      ;;
+  esac
+
+  merged_base=""
+  merge_check_error=false
+  for base_ref in "${base_refs[@]}"; do
+    if git merge-base --is-ancestor "refs/heads/$branch" "$base_ref" >/dev/null 2>&1; then
+      merged_base="$base_ref"
+      break
+    else
+      merge_status=$?
+      if [ "$merge_status" -ne 1 ]; then
+        merge_check_error=true
+      fi
+    fi
+  done
+
+  if [ -n "$merged_base" ]; then
+    merged_base_label="origin/${merged_base#refs/remotes/origin/}"
+    if [ "$dry_run" = true ]; then
+      printf '  ✅ %s%s%s\n     %smerged into %s — would delete%s\n' "$c_green" "$branch" "$c_reset" "$c_dim" "$merged_base_label" "$c_reset"
+      would_delete_count=$((would_delete_count + 1))
+    elif delete_merged_branch "$branch" "$merged_base_label"; then
+      printf '  ✅ %s%s%s\n     %smerged into %s — deleted%s\n' "$c_green" "$branch" "$c_reset" "$c_dim" "$merged_base_label" "$c_reset"
+      deleted_count=$((deleted_count + 1))
+    else
+      printf '  ❌ %s%s%s\n     %smerged into %s, but Git refused deletion%s\n' "$c_red" "$branch" "$c_reset" "$c_dim" "$merged_base_label" "$c_reset"
+      failed_count=$((failed_count + 1))
+    fi
+  elif [ "$force" = true ]; then
+    if [ "$dry_run" = true ]; then
+      printf '  ⚠️  %s%s%s\n     %snot confirmed merged — would force-delete%s\n' "$c_yellow" "$branch" "$c_reset" "$c_dim" "$c_reset"
+      would_force_delete_count=$((would_force_delete_count + 1))
+    else
+      printf '  ⚠️  %s%s%s has commits not confirmed in a surviving primary branch; --force will delete its local branch ref.\n' "$c_yellow" "$branch" "$c_reset"
+      if git branch -D -- "$branch" >/dev/null; then
+        printf '     %sforce-deleted%s\n' "$c_green" "$c_reset"
+        deleted_count=$((deleted_count + 1))
+      else
+        printf '     %sGit refused deletion%s\n' "$c_red" "$c_reset"
+        failed_count=$((failed_count + 1))
+      fi
+    fi
+  else
+    if [ "${#base_refs[@]}" -eq 0 ]; then
+      reason="no surviving origin/main, origin/master, or origin/develop base is available"
+    elif [ "$merge_check_error" = true ]; then
+      reason="Git could not establish merge status"
+    else
+      reason="contains commits not confirmed in origin/main, origin/master, or origin/develop"
+    fi
+    printf '  ⚠️  %s%s%s\n     %s%s — skipped%s\n' "$c_yellow" "$branch" "$c_reset" "$c_dim" "$reason" "$c_reset"
+    skipped_unmerged_count=$((skipped_unmerged_count + 1))
+  fi
+done
+
+print_summary_line() {
+  local label="$1"
+  local count="$2"
+  local color="$3"
+
+  if [ "$count" -eq 0 ]; then
+    color="$c_dim"
+  fi
+  printf '  %s%s: %s%s\n' "$color" "$label" "$count" "$c_reset"
+}
+
+echo ""
+printf '%sSummary:%s\n' "$c_bold" "$c_reset"
+if [ "$dry_run" = true ]; then
+  print_summary_line "would delete merged" "$would_delete_count" "$c_green"
+  if [ "$force" = true ]; then
+    print_summary_line "would force-delete unmerged" "$would_force_delete_count" "$c_yellow"
+  fi
+else
+  print_summary_line "deleted" "$deleted_count" "$c_green"
+fi
+print_summary_line "skipped unmerged" "$skipped_unmerged_count" "$c_yellow"
+print_summary_line "skipped worktree" "$skipped_worktree_count" "$c_cyan"
+print_summary_line "skipped primary" "$skipped_primary_count" "$c_cyan"
+print_summary_line "deletion failures" "$failed_count" "$c_red"
+
+print_branch_listing() {
+  local delimiter=$'\x1f'
+  local head name upstream track marker name_color track_color padded_name worktree_branch
+  local remote_count=0
+
+  echo ""
+  if [ "$dry_run" = true ]; then
+    printf '%sBranches (dry run, nothing was deleted):%s\n' "$c_bold" "$c_reset"
+  else
+    printf '%sBranches after sync:%s\n' "$c_bold" "$c_reset"
+  fi
+
+  echo "  Local:"
+  while IFS="$delimiter" read -r head name upstream track; do
+    [ -n "$name" ] || continue
+
+    marker=" "
+    name_color=""
+    if [ "$head" = "*" ]; then
+      marker="*"
+      name_color="$c_green"
+    else
+      for worktree_branch in "${worktree_branches[@]}"; do
+        if [ "$worktree_branch" = "$name" ]; then
+          marker="+"
+          name_color="$c_cyan"
+          break
+        fi
+      done
+    fi
+
+    # Pad before coloring so escape codes do not break column alignment.
+    padded_name="$(printf '%-36s' "$name")"
+    printf '    %s %s%s%s' "$marker" "$name_color" "$padded_name" "$c_reset"
+
+    if [ -n "$upstream" ]; then
+      printf ' %s-> %s%s' "$c_dim" "$upstream" "$c_reset"
+      if [ -n "$track" ]; then
+        case "$track" in
+          *gone*) track_color="$c_red" ;;
+          *) track_color="$c_yellow" ;;
+        esac
+        printf ' %s%s%s' "$track_color" "$track" "$c_reset"
+      fi
+    else
+      printf ' %s(no upstream)%s' "$c_dim" "$c_reset"
+    fi
+    printf '\n'
+  done < <(git for-each-ref --format="%(HEAD)${delimiter}%(refname:short)${delimiter}%(upstream:short)${delimiter}%(upstream:track)" refs/heads)
+  printf '    %s(* current branch, + checked out in another worktree)%s\n' "$c_dim" "$c_reset"
+
+  echo "  Remote:"
+  while IFS= read -r name; do
+    case "$name" in
+      ""|*/HEAD) continue ;;
+    esac
+    printf '      %s%s%s\n' "$c_red" "$name" "$c_reset"
+    remote_count=$((remote_count + 1))
+  done < <(git for-each-ref --format='%(refname:strip=2)' refs/remotes)
+  if [ "$remote_count" -eq 0 ]; then
+    printf '      %sNone.%s\n' "$c_dim" "$c_reset"
+  fi
+}
+
+print_branch_listing
+
+if [ "$failed_count" -gt 0 ]; then
+  exit 1
+fi

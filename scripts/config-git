@@ -1,0 +1,39 @@
+#!/bin/bash
+# Description: Set local Git identity for the current repository
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "❌ Error: Not inside a Git working tree." >&2
+  exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../lib/local-env.sh"
+
+# Values exported by the caller win; missing ones come from alias/.env.
+local_env_load GIT_WORK_NAME GIT_WORK_EMAIL
+
+missing_values=()
+[ -n "${GIT_WORK_NAME:-}" ] || missing_values+=("GIT_WORK_NAME")
+[ -n "${GIT_WORK_EMAIL:-}" ] || missing_values+=("GIT_WORK_EMAIL")
+
+if [ "${#missing_values[@]}" -gt 0 ]; then
+  echo "❌ Missing ${missing_values[*]}." >&2
+  echo "   Set both GIT_WORK_NAME and GIT_WORK_EMAIL in alias/.env or export them in your environment." >&2
+  echo "   Git config was not changed." >&2
+  exit 1
+fi
+
+if ! git config --local --replace-all user.name "$GIT_WORK_NAME"; then
+  echo "❌ Could not set local user.name." >&2
+  exit 1
+fi
+if ! git config --local --replace-all user.email "$GIT_WORK_EMAIL"; then
+  echo "❌ Could not set local user.email." >&2
+  exit 1
+fi
+
+configured_name="$(git config --local --get user.name)" || exit 1
+configured_email="$(git config --local --get user.email)" || exit 1
+
+echo "✅ Local Git identity configured for this repository:"
+printf '   %s <%s>\n' "$configured_name" "$configured_email"

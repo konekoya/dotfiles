@@ -1,0 +1,235 @@
+#!/bin/bash
+# Description: Show CI/build status for the current branch's PR, drilling into failures
+# Usage: pr-status [PR_ID] [--watch] [--interval SECONDS]
+
+set -euo pipefail
+
+for cmd in jq curl; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "❌ '$cmd' is required. Install with: brew install $cmd"
+    exit 1
+  fi
+done
+
+WATCH=false
+INTERVAL=20
+PR_ID=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --watch) WATCH=true; shift ;;
+    --interval)
+      if [ $# -lt 2 ] || [[ ! "$2" =~ ^[1-9][0-9]*$ ]]; then
+        echo "❌ --interval requires a positive number of seconds." >&2
+        exit 2
+      fi
+      INTERVAL="$2"; shift 2
+      ;;
+    *)
+      if [[ ! "$1" =~ ^[1-9][0-9]*$ ]] || [ -n "$PR_ID" ]; then
+        echo "Usage: pr-status [PR_ID] [--watch] [--interval SECONDS]" >&2
+        exit 2
+      fi
+      PR_ID="$1"; shift
+      ;;
+  esac
+done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../lib/azure-devops.sh"
+source "$SCRIPT_DIR/../lib/http.sh"
+source "$SCRIPT_DIR/../lib/local-env.sh"
+
+# ── Resolve Azure DevOps repository context ──────────────────────────
+if ! ado_resolve_repo_context; then
+  echo "❌ ${ADO_CONTEXT_ERROR}"
+  exit 1
+fi
+ORG_PATH="$ADO_ORG_PATH"
+PROJECT="$ADO_PROJECT"
+PROJECT_PATH="$ADO_PROJECT_PATH"
+REPO_NAME="$ADO_REPO"
+REPO_PATH="$ADO_REPO_PATH"
+
+# ── Auth ─────────────────────────────────────────────────────────────
+if ! ado_get_auth_header; then
+  echo "❌ ${ADO_AUTH_ERROR}"
+  exit 1
+fi
+AUTH_HEADER="$ADO_AUTH_HEADER"
+
+# ── Resolve PR ID for the current branch (same pattern as pr-comments) ─
+if [ -z "$PR_ID" ]; then
+  BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+  if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ]; then
+    echo "❌ Not on a named branch. Pass a PR ID: pr-status <PR_ID>"
+    exit 1
+  fi
+
+  BRANCH_ENCODED=$(jq -rn --arg b "$BRANCH" '$b | @uri')
+
+  PR_ID=$(http_json -H "$AUTH_HEADER" \
+    "https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_apis/git/repositories/${REPO_PATH}/pullrequests?searchCriteria.sourceRefName=refs/heads/${BRANCH_ENCODED}&searchCriteria.status=active&api-version=7.1" \
+    | jq -r '.value[0].pullRequestId // empty')
+
+  if [ -z "$PR_ID" ]; then
+    echo "❌ No open PR found for branch '${BRANCH}'. Pass a PR ID: pr-status <PR_ID>"
+    exit 1
+  fi
+fi
+
+# ── PR metadata (gives us the repository id + project id the policy-evaluations API wants) ─
+PR_META=$(http_json -H "$AUTH_HEADER" \
+  "https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_apis/git/repositories/${REPO_PATH}/pullrequests/${PR_ID}?api-version=7.1")
+
+REPO_ID=$(echo "$PR_META" | jq -r '.repository.id // empty')
+if [ -z "$REPO_ID" ]; then
+  echo "❌ Cannot resolve repository id for PR #${PR_ID}."
+  exit 1
+fi
+
+PROJECT_ID=$(echo "$PR_META" | jq -r '.repository.project.id // empty')
+if [ -z "$PROJECT_ID" ]; then
+  echo "❌ Cannot resolve project id for PR #${PR_ID}."
+  exit 1
+fi
+
+# The PR-level "statuses" API (.../pullrequests/{id}/statuses) only carries whatever ad hoc
+# statuses third-party tools happen to post (e.g. a coverage reporter) — it's not the source of
+# truth for whether the PR is actually mergeable, and can sit on a stale/notApplicable entry
+# forever while the real build is still running, making it look done when it isn't. The build
+# validation branch policy (what the merge button actually gates on) instead lives in the policy
+# EVALUATIONS API, keyed off the PR's artifact id — so that's the signal to poll here.
+ARTIFACT_ID="vstfs:///CodeReview/CodeReviewId/${PROJECT_ID}/${PR_ID}"
+ARTIFACT_ID_ENCODED=$(jq -rn --arg a "$ARTIFACT_ID" '$a | @uri')
+POLICY_URL="https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_apis/policy/evaluations?artifactId=${ARTIFACT_ID_ENCODED}&api-version=7.1-preview.1"
+
+fetch_statuses() {
+  http_json -H "$AUTH_HEADER" "$POLICY_URL"
+}
+
+# Only "Build" policy evaluations (the required build-validation gates) are in scope here — other
+# blocking policies (reviewer count, merge strategy) are PR governance, not CI, and out of this
+# script's stated purpose. "notApplicable" evaluations (policy doesn't apply to this PR's branch
+# scope) are excluded entirely rather than counted as pending/failed.
+BUILD_EVALS_FILTER='
+  .value // [] | map(select(.configuration.type.displayName == "Build" and .status != "notApplicable"))
+'
+
+# Overall state across the in-scope Build evaluations: failed | pending | succeeded | none
+overall_state() {
+  echo "$1" | jq -r "
+    [${BUILD_EVALS_FILTER}[] | .status] as \$states
+    | if (\$states | any(. == \"rejected\" or . == \"broken\")) then \"failed\"
+      elif (\$states | any(. == \"queued\" or . == \"running\")) then \"pending\"
+      elif (\$states | length) == 0 then \"none\"
+      elif (\$states | all(. == \"approved\")) then \"succeeded\"
+      else \"pending\"
+      end
+  "
+}
+
+print_statuses() {
+  echo "$1" | jq -r "
+    ${BUILD_EVALS_FILTER}[]
+    | (if .status == \"approved\" then \"✅\" elif (.status == \"rejected\" or .status == \"broken\") then \"❌\" elif (.status == \"queued\" or .status == \"running\") then \"⏳\" else \"❓\" end)
+      + \" \" + (.context.buildDefinitionName // .configuration.settings.displayName // \"build\")
+      + \" (#\" + (.context.buildId | tostring) + \")\"
+  "
+}
+
+# ── On failure, walk the build timeline to find which job/task actually
+#    failed (the policy evaluation here is a single pass/fail per build definition, so this is
+#    the only place the per-check detail lives), then grab a capped log
+#    excerpt for just that job — never the full log. ─────────────────
+drill_down() {
+  local statuses_json="$1"
+  local build_id
+
+  build_id=$(echo "$statuses_json" | jq -r "
+    [${BUILD_EVALS_FILTER}[] | select(.status == \"rejected\" or .status == \"broken\")][0].context.buildId // empty
+  ")
+
+  if [ -z "$build_id" ]; then
+    echo "  (no buildId on the failed evaluation — open the PR in the browser to see the build)"
+    return
+  fi
+
+  echo "  🔗 Build #${build_id}: https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_build/results?buildId=${build_id}"
+
+  TIMELINE=$(http_json -H "$AUTH_HEADER" \
+    "https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_apis/build/builds/${build_id}/timeline?api-version=7.1")
+
+  FAILED_RECORDS=$(echo "$TIMELINE" | jq -c '
+    [.records // [] | .[] | select(.result == "failed" and (.type == "Job" or .type == "Task"))]
+  ')
+
+  FAILED_COUNT=$(echo "$FAILED_RECORDS" | jq 'length')
+  if [ "$FAILED_COUNT" -eq 0 ]; then
+    echo "  (build failed but no individual job/task is marked failed — check the build page directly)"
+    return
+  fi
+
+  echo "$FAILED_RECORDS" | jq -c '.[]' | while IFS= read -r record; do
+    NAME=$(echo "$record" | jq -r '.name')
+    TYPE=$(echo "$record" | jq -r '.type')
+    LOG_ID=$(echo "$record" | jq -r '.log.id // empty')
+
+    echo ""
+    echo "  ❌ ${TYPE}: ${NAME}"
+
+    if [ -n "$LOG_ID" ]; then
+      LOG=$(http_request -H "$AUTH_HEADER" \
+        "https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_apis/build/builds/${build_id}/logs/${LOG_ID}?api-version=7.1")
+      EXCERPT=$(echo "$LOG" | grep -iE 'error|fail|exception' | tail -60 || true)
+      if [ -z "$EXCERPT" ]; then
+        EXCERPT=$(echo "$LOG" | tail -60)
+      fi
+      echo "$EXCERPT" | sed 's/^/     /'
+    fi
+  done
+}
+
+# ── Main ─────────────────────────────────────────────────────────────
+STATE="none"
+
+check_once() {
+  local statuses_json
+  statuses_json=$(fetch_statuses)
+  if ! printf '%s' "$statuses_json" | jq -e '.value | type == "array"' >/dev/null; then
+    echo "❌ Policy response is missing its evaluations array." >&2
+    return 1
+  fi
+  STATE=$(overall_state "$statuses_json")
+
+  echo ""
+  echo "🔧 PR #${PR_ID}  (${PROJECT}/${REPO_NAME})"
+  echo "🔗 https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_git/${REPO_PATH}/pullrequest/${PR_ID}"
+  echo "───────────────────────────────────────────────────────────"
+  print_statuses "$statuses_json"
+
+  if [ "$STATE" = "failed" ]; then
+    echo ""
+    echo "Failure detail:"
+    drill_down "$statuses_json"
+  fi
+  echo ""
+}
+
+if [ "$WATCH" = true ]; then
+  DEADLINE=$((SECONDS + 540))  # ~9 min, safely under the 10-minute tool-call timeout
+  while true; do
+    check_once
+    if [ "$STATE" != "pending" ] && [ "$STATE" != "none" ]; then
+      exit 0
+    fi
+    if [ $SECONDS -ge $DEADLINE ]; then
+      echo "⏳ Still pending after ~9 minutes of watching — run 'pr-status --watch' again to keep going."
+      exit 0
+    fi
+    echo "⏳ pending — rechecking in ${INTERVAL}s..."
+    sleep "$INTERVAL"
+  done
+else
+  check_once
+fi

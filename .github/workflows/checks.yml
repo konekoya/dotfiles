@@ -1,0 +1,45 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Ensure regression dependencies
+        run: |
+          command -v jq >/dev/null || brew install jq
+          command -v shellcheck >/dev/null || brew install shellcheck
+      - name: Check shell syntax and whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          for file in install.sh scripts/* lib/*.sh tests/*.sh; do
+            /bin/bash -n "$file" || exit 1
+          done
+          for file in alias/.alias alias/.git_alias alias/.util_alias zsh/.zshrc.shared; do
+            zsh -n "$file" || exit 1
+          done
+          if git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            git diff --check "$BASE_SHA" HEAD
+          else
+            git show --format= --check HEAD
+          fi
+      - name: Lint shell scripts with ShellCheck
+        run: shellcheck -S warning -x install.sh scripts/* lib/*.sh tests/*.sh
+      - name: Run regression suites with macOS Bash
+        run: |
+          export PATH="/bin:/usr/bin:/usr/sbin:/sbin:$PATH"
+          for file in tests/*.sh; do
+            /bin/bash "$file" || exit 1
+          done

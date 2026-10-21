@@ -1,0 +1,145 @@
+#!/bin/bash
+# Description: Interactive menu to browse and run scripts in the scripts directory
+
+SCRIPTS_DIR="$(dirname "$(realpath "$0")")"
+
+# ── collect scripts ──────────────────────────────────────────────────────────
+declare -a scripts names descs
+max_name_len=0
+
+for f in "$SCRIPTS_DIR"/*; do
+  [[ -f "$f" && -x "$f" ]] || continue
+  name="$(basename "$f")"
+  [[ "$name" == "cmds" ]] && continue
+
+  desc="$(head -10 "$f" | grep -m1 '^# Description: ' | sed 's/^# Description: //')"
+  [[ -z "$desc" ]] && desc="(no description)"
+
+  scripts+=("$f")
+  names+=("$name")
+  descs+=("$desc")
+
+  (( ${#name} > max_name_len )) && max_name_len=${#name}
+done
+
+if [[ ${#scripts[@]} -eq 0 ]]; then
+  echo "No scripts found in $SCRIPTS_DIR"
+  exit 0
+fi
+
+# ── fzf fast path (optional) ─────────────────────────────────────────────────
+if command -v fzf &>/dev/null; then
+  input=""
+  for i in "${!names[@]}"; do
+    input+="$(printf "%-*s  %s" "$max_name_len" "${names[$i]}" "${descs[$i]}")"$'\n'
+  done
+  selected_name="$(printf '%s' "$input" | fzf \
+    --prompt='> ' \
+    --height=~50% \
+    --layout=reverse \
+    --border \
+    --header='Select a script to run  (Esc to quit)' \
+    | awk '{print $1}')"
+  [[ -z "$selected_name" ]] && exit 0
+  exec "$SCRIPTS_DIR/$selected_name"
+fi
+
+# ── pure bash interactive menu ───────────────────────────────────────────────
+RESET=$'\033[0m'
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+REVERSE=$'\033[7m'
+
+cursor=0
+first_draw=true
+line_count=0
+col_width=$(( max_name_len + 2 ))
+
+draw_menu() {
+  local lines=0
+  if [[ $first_draw == false ]]; then
+    printf "\033[%dA" "$line_count"
+  fi
+  first_draw=false
+
+  printf "%s  Scripts%s\n" "$BOLD" "$RESET"
+  (( lines++ ))
+
+  for i in "${!names[@]}"; do
+    if (( i == cursor )); then
+      printf "%s  %-*s  %s%s\n" "$REVERSE" "$col_width" "${names[$i]}" "${descs[$i]}" "$RESET"
+    else
+      printf "  %-*s  %s\n" "$col_width" "${names[$i]}" "${DIM}${descs[$i]}${RESET}"
+    fi
+    (( lines++ ))
+  done
+
+  printf "\n%s  ↑↓ navigate  Enter run  q quit%s\n" "$DIM" "$RESET"
+  (( lines += 2 ))
+
+  line_count=$lines
+}
+
+_KEY=""
+read_key() {
+  local key status
+  _KEY=""
+  # A bounded read lets Bash handle a pending TERM trap while waiting for input.
+  while true; do
+    if IFS= read -rs -n1 -t 1 key; then
+      break
+    else
+      status=$?
+    fi
+    if (( status <= 128 )); then
+      _KEY="QUIT"
+      return
+    fi
+  done
+  if [[ "$key" == $'\033' ]]; then
+    IFS= read -rs -n2 -t 1 key
+    case "$key" in
+      '[A') _KEY="UP"    ;;
+      '[B') _KEY="DOWN"  ;;
+      *)    _KEY="ESC"   ;;
+    esac
+  elif [[ "$key" == "" ]]; then
+    _KEY="ENTER"
+  elif [[ "$key" =~ ^[qQ]$ ]]; then
+    _KEY="QUIT"
+  fi
+}
+
+# ── terminal setup ────────────────────────────────────────────────────────────
+saved_stty="$(stty -g)" || exit 1
+cleanup() {
+  tput cnorm
+  stty "$saved_stty"
+  echo
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+stty -echo
+tput civis
+
+# ── main loop ─────────────────────────────────────────────────────────────────
+selected=-1
+while true; do
+  draw_menu
+  read_key
+  case "$_KEY" in
+    UP)    (( cursor > 0 )) && (( cursor-- ))                        ;;
+    DOWN)  (( cursor < ${#scripts[@]} - 1 )) && (( cursor++ ))       ;;
+    ENTER) selected=$cursor; break                                    ;;
+    QUIT|ESC) break                                                   ;;
+  esac
+done
+
+if (( selected >= 0 )); then
+  cleanup
+  trap - EXIT INT TERM
+  exec "${scripts[$selected]}"
+fi
+exit 0

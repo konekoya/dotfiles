@@ -1,0 +1,321 @@
+#!/bin/bash
+# Description: Create an Azure DevOps PR and link it to a ClickUp task
+
+# Usage: submit-pr [CLICKUP_TASK_ID]
+#
+# Automates the PR workflow:
+#   1. Extracts ClickUp task ID from branch name (e.g. feat/#86abc123-fix-login)
+#      or accepts it as an argument
+#   2. Fetches task title from ClickUp for the PR title
+#   3. Pushes branch and creates an Azure DevOps PR
+#   4. Adds PR URL as a comment on the ClickUp task
+#   5. Prompts to update the ClickUp task status
+#
+# Auth:
+#   Azure DevOps — per-organization PAT or validated Azure CLI profile
+#   ClickUp      — CLICKUP_API_TOKEN env var (generate at ClickUp → Settings → Apps)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../lib/azure-devops.sh"
+source "$SCRIPT_DIR/../lib/http.sh"
+source "$SCRIPT_DIR/../lib/local-env.sh"
+
+# Tokens live in alias/.env and are loaded here, not exported by the interactive shell.
+local_env_load CLICKUP_API_TOKEN
+
+# ── Prerequisites ────────────────────────────────────────────────────
+for cmd in jq curl; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "❌ '$cmd' is required. Install with: brew install $cmd"
+    exit 1
+  fi
+done
+
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+  echo "❌ Not inside a git repository."
+  exit 1
+fi
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ]; then
+  echo "❌ Not on a named branch (detached HEAD?)."
+  exit 1
+fi
+
+# ── Extract ClickUp task ID ──────────────────────────────────────────
+TASK_ID="${1:-}"
+
+if [ -z "$TASK_ID" ]; then
+  if [[ "$BRANCH" =~ \#([a-zA-Z0-9]+) ]]; then
+    TASK_ID="${BASH_REMATCH[1]}"
+  fi
+fi
+
+CLICKUP_ENABLED=false
+TASK_TITLE=""
+
+if [ -n "$TASK_ID" ]; then
+  if [ -n "${CLICKUP_API_TOKEN:-}" ]; then
+    CLICKUP_ENABLED=true
+  else
+    echo "⚠️  ClickUp task ID found (#${TASK_ID}) but CLICKUP_API_TOKEN is not set."
+    echo "   Skipping ClickUp integration. Set the env var to enable it."
+    echo "   (Generate a token at ClickUp → Settings → Apps)"
+    echo ""
+  fi
+else
+  echo "ℹ️  No ClickUp task ID found in branch name or arguments."
+  echo "   PR will be created without ClickUp integration."
+  echo "   To link a task, use: submit-pr <TASK_ID>"
+  echo ""
+fi
+
+# ── Fetch ClickUp task details ───────────────────────────────────────
+if $CLICKUP_ENABLED; then
+  echo "🔍 Fetching ClickUp task #${TASK_ID}..."
+  if TASK_BODY=$(http_json \
+    -H "Authorization: ${CLICKUP_API_TOKEN}" \
+    "https://api.clickup.com/api/v2/task/${TASK_ID}"); then
+    TASK_TITLE=$(echo "$TASK_BODY" | jq -r '.name // empty')
+    TASK_LIST_ID=$(echo "$TASK_BODY" | jq -r '.list.id // empty')
+    TASK_STATUS=$(echo "$TASK_BODY" | jq -r '.status.status // empty')
+    echo "   ✅ ${TASK_TITLE}"
+    echo "   📋 Current status: ${TASK_STATUS}"
+  else
+    echo "⚠️  Could not fetch ClickUp task #${TASK_ID}; continuing without ClickUp integration."
+    CLICKUP_ENABLED=false
+  fi
+fi
+
+# ── Resolve Azure DevOps repository and authentication ───────────────
+if ! ado_resolve_repo_context; then
+  echo "❌ ${ADO_CONTEXT_ERROR}"
+  exit 1
+fi
+ORG="$ADO_ORG"
+ORG_PATH="$ADO_ORG_PATH"
+PROJECT="$ADO_PROJECT"
+PROJECT_PATH="$ADO_PROJECT_PATH"
+REPO="$ADO_REPO"
+REPO_PATH="$ADO_REPO_PATH"
+if ! ado_get_auth_header; then
+  echo "❌ ${ADO_AUTH_ERROR}"
+  exit 1
+fi
+AUTH_HEADER="$ADO_AUTH_HEADER"
+
+# ── Determine target branch ─────────────────────────────────────────
+TARGET_BRANCH=$(git symbolic-ref "refs/remotes/${ADO_REMOTE_NAME}/HEAD" --short 2>/dev/null || true)
+TARGET_BRANCH="${TARGET_BRANCH#${ADO_REMOTE_NAME}/}"
+
+if [ -z "$TARGET_BRANCH" ]; then
+  # Fallback: check common default branch names
+  for candidate in main master develop; do
+    if git rev-parse --verify "${ADO_REMOTE_NAME}/${candidate}" &>/dev/null; then
+      TARGET_BRANCH="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "$TARGET_BRANCH" ]; then
+  echo "❌ Cannot determine target branch for selected remote '${ADO_REMOTE_NAME}'. Set its default branch with:"
+  echo "   git remote set-head ${ADO_REMOTE_NAME} --auto"
+  exit 1
+fi
+
+# ── Build PR title and description ───────────────────────────────────
+if [ -n "$TASK_TITLE" ]; then
+  DEFAULT_TITLE="#${TASK_ID} - ${TASK_TITLE}"
+else
+  # Fallback: derive title from branch name (strip prefix and task ID)
+  BRANCH_DESC=$(echo "$BRANCH" | sed -E 's|^[^/]+/||; s|#[a-zA-Z0-9]+-?||; s|-| |g')
+  DEFAULT_TITLE="$BRANCH_DESC"
+fi
+
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo "  📂 ${ORG}/${PROJECT}/${REPO}"
+echo "  🔀 ${BRANCH} → ${TARGET_BRANCH}"
+if [ -n "$TASK_ID" ]; then
+  echo "  🔗 ClickUp: https://www.clickup.com/t/${TASK_ID}"
+fi
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+echo "📝 PR Title: ${DEFAULT_TITLE}"
+read -rp "   (press Enter to accept, or type a new title): " CUSTOM_TITLE
+PR_TITLE="${CUSTOM_TITLE:-$DEFAULT_TITLE}"
+
+PR_DESCRIPTION=""
+if [ -n "$TASK_ID" ]; then
+  PR_DESCRIPTION="closes https://www.clickup.com/t/${TASK_ID}"
+fi
+
+read -rp "📝 Additional PR description (optional, Enter to skip): " EXTRA_DESC
+if [ -n "$EXTRA_DESC" ]; then
+  if [ -n "$PR_DESCRIPTION" ]; then
+    PR_DESCRIPTION="${EXTRA_DESC}"$'\n\n'"${PR_DESCRIPTION}"
+  else
+    PR_DESCRIPTION="$EXTRA_DESC"
+  fi
+fi
+
+# ── Push branch ──────────────────────────────────────────────────────
+echo ""
+echo "🚀 Pushing branch to ${ADO_REMOTE_NAME}..."
+if ! git push -u "$ADO_REMOTE_NAME" "$BRANCH" >/dev/null 2>&1; then
+  echo "❌ Failed to push branch to the selected remote. Check Git transport credentials and remote permissions."
+  exit 1
+fi
+
+# ── Check for existing PR ────────────────────────────────────────────
+BRANCH_ENCODED=$(jq -rn --arg b "$BRANCH" '$b | @uri')
+
+EXISTING_PR=$(http_json -H "$AUTH_HEADER" \
+  "https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_apis/git/repositories/${REPO_PATH}/pullrequests?searchCriteria.sourceRefName=refs/heads/${BRANCH_ENCODED}&searchCriteria.status=active&api-version=7.1" \
+  | jq -r '.value[0].pullRequestId // empty')
+
+if [ -n "$EXISTING_PR" ]; then
+  PR_URL="https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_git/${REPO_PATH}/pullrequest/${EXISTING_PR}"
+  echo ""
+  echo "⚠️  A PR already exists for this branch:"
+  echo "   🔗 ${PR_URL}"
+  echo ""
+  read -rp "   Continue to ClickUp linking? (y/N): " CONTINUE_LINK
+  if [[ "$CONTINUE_LINK" != [yY] ]]; then
+    echo "👋 Done."
+    exit 0
+  fi
+  PR_ID="$EXISTING_PR"
+else
+  # ── Create PR ────────────────────────────────────────────────────────
+  echo ""
+  echo "📦 Creating pull request..."
+
+  PR_BODY=$(http_json -X POST \
+    -H "$AUTH_HEADER" \
+    -H "Content-Type: application/json" \
+    "https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_apis/git/repositories/${REPO_PATH}/pullrequests?api-version=7.1" \
+    -d "$(jq -n --arg source "refs/heads/$BRANCH" --arg target "refs/heads/$TARGET_BRANCH" \
+      --arg title "$PR_TITLE" --arg description "$PR_DESCRIPTION" \
+      '{sourceRefName: $source, targetRefName: $target, title: $title, description: $description}')")
+
+  PR_ID=$(echo "$PR_BODY" | jq -er '.pullRequestId | select(type == "number" and . > 0)')
+  PR_URL="https://dev.azure.com/${ORG_PATH}/${PROJECT_PATH}/_git/${REPO_PATH}/pullrequest/${PR_ID}"
+
+  echo "   ✅ PR #${PR_ID} created!"
+fi
+
+echo ""
+echo "   🔗 ${PR_URL}"
+
+# ── ClickUp integration ─────────────────────────────────────────────
+if $CLICKUP_ENABLED; then
+  echo ""
+  echo "📎 Adding PR link to ClickUp task #${TASK_ID}..."
+
+  COMMENT_BODY="🔗 Azure DevOps PR: ${PR_URL}"
+  if http_json \
+    -X POST \
+    -H "Authorization: ${CLICKUP_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    "https://api.clickup.com/api/v2/task/${TASK_ID}/comment" \
+    -d "$(jq -n --arg comment "$COMMENT_BODY" '{comment_text: $comment}')" >/dev/null; then
+    echo "   ✅ Comment added to ClickUp task"
+  else
+    echo "   ⚠️  Could not add comment; the PR is available at ${PR_URL}."
+  fi
+
+  # ── Update ClickUp task status ─────────────────────────────────────
+  echo ""
+  read -rp "🔄 Update ClickUp task status? (Y/n): " UPDATE_STATUS
+  if [[ "$UPDATE_STATUS" != [nN] ]]; then
+    if [ -n "${TASK_LIST_ID:-}" ]; then
+      # Fetch available statuses from the task's list
+      if ! STATUSES_JSON=$(http_json \
+        -H "Authorization: ${CLICKUP_API_TOKEN}" \
+        "https://api.clickup.com/api/v2/list/${TASK_LIST_ID}" \
+        | jq -r '.statuses // []'); then
+        echo "   ⚠️  Could not fetch task statuses; skipping status update."
+        STATUSES_JSON='[]'
+      fi
+
+      STATUS_COUNT=$(echo "$STATUSES_JSON" | jq 'length')
+
+      if [ "$STATUS_COUNT" -gt 0 ]; then
+        echo ""
+        echo "   Available statuses:"
+
+        STATUS_NAMES=()
+        for i in $(seq 0 $((STATUS_COUNT - 1))); do
+          STATUS_NAME=$(echo "$STATUSES_JSON" | jq -r ".[$i].status")
+          STATUS_NAMES+=("$STATUS_NAME")
+          MARKER=""
+          if [ "$STATUS_NAME" = "${TASK_STATUS:-}" ]; then
+            MARKER=" (current)"
+          fi
+          echo "   $((i + 1)). ${STATUS_NAME}${MARKER}"
+        done
+
+        # Detect a single "code review"-matching status to suggest as the default.
+        CR_EXACT=$(echo "$STATUSES_JSON" | jq -r '[.[] | select(.status | ascii_downcase == "code review")] | length')
+        CR_NAME=""
+        if [ "$CR_EXACT" = "1" ]; then
+          CR_NAME=$(echo "$STATUSES_JSON" | jq -r '.[] | select(.status | ascii_downcase == "code review") | .status')
+        elif [ "$CR_EXACT" = "0" ]; then
+          CR_SUBSTR=$(echo "$STATUSES_JSON" | jq -r '[.[] | select(.status | ascii_downcase | contains("review"))] | length')
+          if [ "$CR_SUBSTR" = "1" ]; then
+            CR_NAME=$(echo "$STATUSES_JSON" | jq -r '.[] | select(.status | ascii_downcase | contains("review")) | .status')
+          fi
+        fi
+
+        echo ""
+        if [ -n "$CR_NAME" ]; then
+          read -rp "   Pick a status (number, Enter to apply suggested \"${CR_NAME}\", or 's' to skip): " STATUS_PICK
+        else
+          read -rp "   Pick a status (number, or Enter to skip): " STATUS_PICK
+        fi
+
+        NEW_STATUS=""
+        if [ -n "$CR_NAME" ] && [ -z "$STATUS_PICK" ]; then
+          NEW_STATUS="$CR_NAME"
+        elif [ "$STATUS_PICK" = "s" ] || [ "$STATUS_PICK" = "S" ] || [ -z "$STATUS_PICK" ]; then
+          NEW_STATUS=""
+        elif [ "$STATUS_PICK" -ge 1 ] 2>/dev/null && [ "$STATUS_PICK" -le "$STATUS_COUNT" ]; then
+          NEW_STATUS="${STATUS_NAMES[$((STATUS_PICK - 1))]}"
+        fi
+
+        if [ -n "$NEW_STATUS" ]; then
+          if http_json \
+            -X PUT \
+            -H "Authorization: ${CLICKUP_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://api.clickup.com/api/v2/task/${TASK_ID}" \
+            -d "$(jq -n --arg status "$NEW_STATUS" '{status: $status}')" >/dev/null; then
+            echo "   ✅ Status updated to: ${NEW_STATUS}"
+          else
+            echo "   ⚠️  Could not update status."
+          fi
+        else
+          echo "   ⏭️  Skipped status update."
+        fi
+      else
+        echo "   ⚠️  No statuses found for this list."
+      fi
+    else
+      echo "   ⚠️  Could not determine task list — skipping status update."
+    fi
+  fi
+fi
+
+# ── Open in browser ──────────────────────────────────────────────────
+echo ""
+read -rp "🌐 Open PR in browser? (Y/n): " OPEN_BROWSER
+if [[ "$OPEN_BROWSER" != [nN] ]]; then
+  open -a "Google Chrome" "$PR_URL" 2>/dev/null || open "$PR_URL" 2>/dev/null || echo "   Could not open browser."
+fi
+
+echo ""
+echo "🎉 Done!"

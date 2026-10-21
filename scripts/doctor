@@ -1,0 +1,454 @@
+#!/bin/bash
+# Description: Check if dotfiles are properly installed and configured
+# shellcheck disable=SC2088 # "~/..." in messages is literal text, not a path to expand
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 1
+DOTFILES_DIR="$(cd "$SCRIPT_DIR/.." && pwd)" || exit 1
+ENV_FILE="$DOTFILES_DIR/alias/.env"
+source "$DOTFILES_DIR/lib/shell-config.sh" || exit 1
+source "$DOTFILES_DIR/lib/agent-policy.sh" || exit 1
+PASS="✅ PASS"
+WARN="⚠️ WARN"
+FAIL="❌ FAIL"
+pass_count=0
+warn_count=0
+fail_count=0
+
+section() {
+  echo ""
+  echo "── $1 ──"
+}
+
+check_pass() {
+  echo "  $PASS: $1"
+  pass_count=$((pass_count + 1))
+}
+
+check_warn() {
+  echo "  $WARN: $1"
+  warn_count=$((warn_count + 1))
+}
+
+check_fail() {
+  echo "  $FAIL: $1"
+  fail_count=$((fail_count + 1))
+}
+
+path_resolves_to() {
+  local path="$1"
+  local expected="$2"
+  local resolved_path
+  local resolved_expected
+
+  resolved_path="$(cd -P "$path" 2>/dev/null && pwd -P)" || return 1
+  resolved_expected="$(cd -P "$expected" 2>/dev/null && pwd -P)" || return 1
+  [ "$resolved_path" = "$resolved_expected" ]
+}
+
+zsh_plugin_is_configured_to_load() {
+  local plugin="$1"
+  local config="$2"
+
+  [ -f "$config" ] || return 1
+
+  awk -v plugin="$plugin" \
+    -v entrypoint="${plugin}.plugin.zsh" \
+    -v source_command='source "$_dotfiles_plugin_file"' \
+    -v fzf_init='eval "$_dotfiles_fzf_init"' '
+    /^[[:space:]]*#/ { next }
+    index($0, entrypoint) { entrypoint_line = NR }
+    index($0, source_command) && entrypoint_line && NR > entrypoint_line { source_line = NR }
+    plugin == "zsh-autosuggestions" && index($0, "plugins=") && index($0, plugin) { normal_omz_loader = 1 }
+    plugin == "zsh-autosuggestions" && index($0, "_dotfiles_omz_preloaded") && index($0, "true") { preloaded_omz_guard = 1 }
+    plugin == "zsh-syntax-highlighting" && index($0, fzf_init) { fzf_line = NR }
+    END {
+      configured = entrypoint_line && source_line
+      if (plugin == "zsh-autosuggestions") {
+        configured = configured && normal_omz_loader && preloaded_omz_guard
+      } else if (plugin == "zsh-syntax-highlighting") {
+        configured = configured && fzf_line && entrypoint_line > fzf_line && source_line > entrypoint_line
+      }
+      exit !configured
+    }
+  ' "$config" 2>/dev/null
+}
+
+has_local_value() {
+  local variable_name="$1"
+  local environment_value="${!variable_name}"
+
+  [ -n "$environment_value" ] && return 0
+  [ -f "$ENV_FILE" ] || return 1
+
+  (
+    unset "$variable_name"
+    # shellcheck source=/dev/null
+    source "$ENV_FILE" >/dev/null 2>&1 || true
+    [ -n "${!variable_name}" ]
+  )
+}
+
+echo "🩺 Dotfiles Doctor"
+
+# --- Symlinks ---
+section "Symlinks"
+
+for pair in \
+  "$HOME/.gitconfig:$DOTFILES_DIR/git/.gitconfig" \
+  "$HOME/.gitignore_global:$DOTFILES_DIR/git/.gitignore_global"; do
+  link="${pair%%:*}"
+  target="${pair##*:}"
+  name="${link/#$HOME/~}"
+  if [ -L "$link" ] && [ -e "$link" ] && [ "$link" -ef "$target" ]; then
+    check_pass "$name → $target"
+  elif [ -e "$link" ] || [ -L "$link" ]; then
+    check_fail "$name is not a working symlink to $target — review and resolve this existing path manually; install.sh preserves it"
+  else
+    check_fail "$name is missing — run install.sh"
+  fi
+done
+
+# Identity lives in ~/.gitconfig.local, included by the shared Git config.
+if [ -f "$HOME/.gitconfig.local" ]; then
+  check_pass "~/.gitconfig.local exists"
+else
+  check_warn "~/.gitconfig.local is missing — run install.sh"
+fi
+
+if command -v git >/dev/null 2>&1; then
+  if [ -n "$(git config --global --includes --get user.name 2>/dev/null)" ] && [ -n "$(git config --global --includes --get user.email 2>/dev/null)" ]; then
+    check_pass "Git user.name and user.email are set"
+  else
+    check_warn "Git user.name or user.email is not set — edit ~/.gitconfig.local"
+  fi
+fi
+
+# Optional work identity: only matters once ~/.gitconfig.local enables its includeIf rules.
+if grep -Eq '^[[:space:]]*\[includeIf ' "$HOME/.gitconfig.local" 2>/dev/null; then
+  if [ -f "$HOME/.gitconfig.work" ]; then
+    check_pass "~/.gitconfig.work exists for the includeIf rules in ~/.gitconfig.local"
+  else
+    check_warn "~/.gitconfig.local has includeIf rules but ~/.gitconfig.work is missing — run install.sh"
+  fi
+fi
+
+# Optional prompt config: a local file is legitimate, so only warn.
+starship_link="$HOME/.config/starship.toml"
+starship_target="$DOTFILES_DIR/zsh/starship.toml"
+if [ -L "$starship_link" ] && [ -e "$starship_link" ] && [ "$starship_link" -ef "$starship_target" ]; then
+  check_pass "~/.config/starship.toml → $starship_target"
+elif [ -e "$starship_link" ] || [ -L "$starship_link" ]; then
+  check_warn "~/.config/starship.toml is not a symlink to $starship_target — the shared prompt is not in use on this machine"
+else
+  check_warn "~/.config/starship.toml is missing — run install.sh"
+fi
+
+# --- Shared AI Skills ---
+section "Shared AI Skills"
+
+tool_labels=("Claude Code" "GitHub Copilot CLI" "Codex" "Kiro CLI")
+tool_dirs=("$HOME/.claude/skills" "$HOME/.copilot/skills" "$HOME/.agents/skills" "$HOME/.kiro/skills")
+# Skills Claude Code ships as an official plugin; install.sh does not link the
+# repository copy there. Keep this list in sync with install.sh.
+tool_skipped=("skill-creator" "" "" "")
+tool_ready=()
+
+for index in "${!tool_dirs[@]}"; do
+  tool_dir="${tool_dirs[$index]}"
+  tool_name="${tool_dir/#$HOME/~}"
+  if [ -L "$tool_dir" ]; then
+    check_fail "$tool_name is a symlink; expected a real directory — run install.sh"
+    tool_ready[$index]=false
+  elif [ -d "$tool_dir" ]; then
+    tool_ready[$index]=true
+  else
+    check_fail "$tool_name is missing — run install.sh"
+    tool_ready[$index]=false
+  fi
+done
+
+skill_dirs=()
+for skill_dir in "$DOTFILES_DIR"/skills/*; do
+  [ -d "$skill_dir" ] && [ ! -L "$skill_dir" ] || continue
+  [ -f "$skill_dir/SKILL.md" ] || continue
+  skill_dirs+=("$skill_dir")
+done
+
+if [ "${#skill_dirs[@]}" -eq 0 ]; then
+  check_fail "No repository-managed skills with SKILL.md found under skills/"
+else
+  for index in "${!tool_dirs[@]}"; do
+    [ "${tool_ready[$index]}" = true ] || continue
+    missing_skill_links=()
+    stale_skill_links=()
+    expected_skills=0
+
+    for skill_dir in "${skill_dirs[@]}"; do
+      skill_name="${skill_dir##*/}"
+      skill_link="${tool_dirs[$index]}/$skill_name"
+      skill_linked=false
+      if [ -L "$skill_link" ] && {
+        [ "$(readlink "$skill_link" 2>/dev/null)" = "$skill_dir" ] || path_resolves_to "$skill_link" "$skill_dir"
+      }; then
+        skill_linked=true
+      fi
+
+      case " ${tool_skipped[$index]} " in
+        *" $skill_name "*)
+          [ "$skill_linked" = true ] && stale_skill_links+=("$skill_name")
+          continue
+          ;;
+      esac
+
+      expected_skills=$((expected_skills + 1))
+      [ "$skill_linked" = true ] || missing_skill_links+=("$skill_name")
+    done
+
+    if [ "${#missing_skill_links[@]}" -eq 0 ]; then
+      check_pass "${tool_labels[$index]}: all $expected_skills shared skill links are correct"
+    else
+      check_fail "${tool_labels[$index]}: ${#missing_skill_links[@]}/$expected_skills links missing or incorrect (${missing_skill_links[*]}) — run install.sh"
+    fi
+
+    if [ "${#stale_skill_links[@]}" -gt 0 ]; then
+      check_warn "${tool_labels[$index]}: ${stale_skill_links[*]} duplicates the bundled plugin — run install.sh to remove the link"
+    fi
+  done
+fi
+
+# --- Optional Agent Security Policy ---
+section "Agent Credential Safety"
+check_agent_policy
+
+# --- Shell config ---
+section "Shell Config (~/.zshrc)"
+
+ZSHRC="$HOME/.zshrc"
+SHARED_ZSH_CONFIG_REFERENCED=false
+if [ -f "$ZSHRC" ]; then
+  if shell_config_has_setting "$ZSHRC" aliases; then
+    check_pass "Aliases are sourced"
+  else
+    check_fail "Missing: source $(shell_config_ref "$DOTFILES_DIR/alias/.alias" tilde)"
+  fi
+
+  if shell_config_has_setting "$ZSHRC" shared; then
+    SHARED_ZSH_CONFIG_REFERENCED=true
+    check_pass "~/.zshrc is configured to source the shared zsh config"
+  else
+    check_warn "Missing: source $(shell_config_ref "$DOTFILES_DIR/zsh/.zshrc.shared" tilde) — run install.sh"
+  fi
+
+  if shell_config_has_setting "$ZSHRC" path; then
+    check_pass "Scripts PATH is exported"
+  else
+    check_fail "Missing: export PATH=\"$(shell_config_ref "$DOTFILES_DIR/scripts" home):\$PATH\""
+  fi
+else
+  check_fail "~/.zshrc not found"
+fi
+
+# --- PATH at runtime ---
+section "PATH"
+
+if echo "$PATH" | tr ':' '\n' | grep -Fxq "$DOTFILES_DIR/scripts"; then
+  check_pass "dotfiles/scripts is in PATH"
+else
+  check_warn "dotfiles/scripts is not in current PATH (restart shell or source ~/.zshrc)"
+fi
+
+# --- Repository ---
+if git -C "$DOTFILES_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 &&
+   upstream="$(git -C "$DOTFILES_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
+  section "Repository"
+
+  fetch_upstream() {
+    # Refresh the remote state so the comparison is current; never prompt, and give up quickly offline.
+    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5" \
+      git -C "$DOTFILES_DIR" -c http.lowSpeedLimit=1 -c http.lowSpeedTime=5 fetch --quiet 2>/dev/null
+  }
+
+  fetched=false
+  if [ -t 1 ]; then
+    # Show a spinner on a terminal; piped output stays free of progress noise.
+    spinner_frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+    fetch_upstream &
+    fetch_pid=$!
+    trap 'kill "$fetch_pid" 2>/dev/null; printf "\r\033[2K"; exit 130' INT
+    frame=0
+    while kill -0 "$fetch_pid" 2>/dev/null; do
+      printf '\r  %s Checking %s for updates...' "${spinner_frames[frame % 10]}" "$upstream"
+      frame=$((frame + 1))
+      sleep 0.1
+    done
+    printf '\r\033[2K'
+    trap - INT
+    wait "$fetch_pid" && fetched=true
+  elif fetch_upstream; then
+    fetched=true
+  fi
+
+  behind="$(git -C "$DOTFILES_DIR" rev-list --count 'HEAD..@{u}' 2>/dev/null)" || behind=0
+  if [ "$behind" -gt 0 ]; then
+    check_warn "dotfiles is $behind commit(s) behind $upstream — run git pull in $(shell_config_ref "$DOTFILES_DIR" tilde), then re-run install.sh"
+  elif [ "$fetched" = true ]; then
+    check_pass "dotfiles is up to date with $upstream"
+  else
+    check_warn "Could not reach the remote; not behind $upstream as of the last fetch"
+  fi
+fi
+
+# --- User alias file ---
+section "User Alias"
+
+if [ -f "$DOTFILES_DIR/alias/.user_alias" ]; then
+  check_pass ".user_alias exists"
+else
+  check_warn ".user_alias is missing — run install.sh to create it"
+fi
+
+if [ -f "$DOTFILES_DIR/zsh/.zshrc.local" ]; then
+  check_pass "zsh/.zshrc.local exists"
+else
+  check_warn "zsh/.zshrc.local is missing — run install.sh to create it"
+fi
+
+# --- Oh My Zsh Plugins ---
+section "Oh My Zsh Plugins"
+
+ZSH_DIR="${ZSH:-$HOME/.oh-my-zsh}"
+ZSH_CUSTOM_DIR="${ZSH_CUSTOM:-$ZSH_DIR/custom}"
+OMZ_ENTRYPOINT="$ZSH_DIR/oh-my-zsh.sh"
+DEFAULT_ZSH_CUSTOM_DIR="$HOME/.oh-my-zsh/custom"
+oh_my_zsh_available=false
+
+if [ -f "$OMZ_ENTRYPOINT" ] && [ -r "$OMZ_ENTRYPOINT" ]; then
+  oh_my_zsh_available=true
+  check_pass "oh-my-zsh entrypoint is present and readable"
+else
+  check_warn "oh-my-zsh entrypoint is not present at the effective ZSH path — normal plugin-manager loading cannot be verified"
+fi
+
+for plugin in zsh-autosuggestions zsh-syntax-highlighting; do
+  plugin_entrypoint="$ZSH_CUSTOM_DIR/plugins/$plugin/$plugin.plugin.zsh"
+  if [ -f "$plugin_entrypoint" ] && [ -r "$plugin_entrypoint" ] && [ -s "$plugin_entrypoint" ]; then
+    check_pass "$plugin entrypoint is present, readable, and non-empty"
+  elif [ -d "$ZSH_CUSTOM_DIR/plugins/$plugin" ]; then
+    if [ "$ZSH_CUSTOM_DIR" = "$DEFAULT_ZSH_CUSTOM_DIR" ]; then
+      check_warn "$plugin installation is incomplete — inspect and move the directory aside, then run ./install.sh --install-deps"
+    else
+      check_warn "$plugin installation is incomplete — inspect and move it aside, then reinstall it under the effective ZSH_CUSTOM path"
+    fi
+  elif [ "$plugin" = zsh-autosuggestions ] && [ "$oh_my_zsh_available" = false ]; then
+    : # No plugin-manager installation is expected when Oh My Zsh is absent.
+  elif [ "$ZSH_CUSTOM_DIR" = "$DEFAULT_ZSH_CUSTOM_DIR" ]; then
+    check_warn "$plugin is not installed — run ./install.sh --install-deps"
+  else
+    check_warn "$plugin is not installed under the effective ZSH_CUSTOM path — install it there to enable the shared loader"
+  fi
+
+  if zsh_plugin_is_configured_to_load "$plugin" "$DOTFILES_DIR/zsh/.zshrc.shared"; then
+    if [ "$SHARED_ZSH_CONFIG_REFERENCED" != true ]; then
+      check_warn "$plugin is configured in the shared zsh config, but ~/.zshrc does not source it — run install.sh"
+    elif [ "$plugin" = zsh-autosuggestions ] && [ "$oh_my_zsh_available" = false ]; then
+      check_warn "$plugin is configured in the shared zsh config, but Oh My Zsh is absent at the effective ZSH path (runtime loading is not verified)"
+    else
+      check_pass "$plugin is configured in the shared zsh config (runtime loading is not verified)"
+    fi
+  else
+    check_warn "$plugin is not configured across the supported shared zsh loading paths — update zsh/.zshrc.shared"
+  fi
+done
+
+# --- Dependencies ---
+section "Dependencies"
+
+starship_installed=false
+for cmd in delta fzf jq curl python3 docker az gh starship; do
+  case "$cmd" in
+    delta)  pkg="git-delta"; note="configured Git pager is unavailable" ;;
+    fzf)    pkg="fzf";        note="fuzzy selection unavailable; Bash fallbacks remain available" ;;
+    jq)     pkg="jq";         note="API-backed PR commands need jq" ;;
+    curl)   pkg="curl";       note="API-backed PR commands need curl" ;;
+    python3) pkg="python";    note="server alias and some regression checks are unavailable" ;;
+    docker) pkg="docker";     note="docker-clean is unavailable without the Docker CLI" ;;
+    az)     pkg="azure-cli";  note="Azure DevOps profiles using auth=azure-cli are unavailable; PAT profiles remain supported" ;;
+    gh)     pkg="gh";         note="GitHub CLI auth fallback unavailable; GITHUB_TOKEN remains supported" ;;
+    starship) pkg="starship"; note="shared prompt unavailable; zsh falls back to the oh-my-zsh theme (needs a Nerd Font)" ;;
+  esac
+
+  if command -v "$cmd" >/dev/null 2>&1; then
+    check_pass "$cmd installed"
+    [ "$cmd" != starship ] || starship_installed=true
+  else
+    check_warn "$cmd not found — $note (brew install $pkg)"
+  fi
+done
+
+# File names identify the Hack Nerd Font package without reading font contents.
+# This does not prove that macOS or the active terminal has loaded the font.
+if [ "$starship_installed" = true ] && [ "$SHARED_ZSH_CONFIG_REFERENCED" = true ]; then
+  hack_nerd_font_found=false
+  for font_dir in "$HOME/Library/Fonts" /Library/Fonts; do
+    for font_file in "$font_dir"/HackNerdFont*.ttf "$font_dir"/HackNerdFont*.otf; do
+      if [ -f "$font_file" ] && [ -r "$font_file" ] && [ -s "$font_file" ]; then
+        hack_nerd_font_found=true
+        break 2
+      fi
+    done
+  done
+
+  if [ "$hack_nerd_font_found" = true ]; then
+    check_pass "Hack Nerd Font file is present; macOS font registration, terminal font selection, and glyph rendering are not verified"
+  else
+    check_warn "Hack Nerd Font installation is not verified — if Starship icons appear as boxes, install font-hack-nerd-font and select Hack NF in your terminal"
+  fi
+fi
+
+# --- Local Configuration / Environment ---
+section "Local Configuration / Environment"
+
+if [ -f "$ENV_FILE" ]; then
+  check_pass "alias/.env exists"
+  env_mode="$(stat -L -f '%Lp' "$ENV_FILE" 2>/dev/null)" || env_mode="$(stat -L -c '%a' "$ENV_FILE" 2>/dev/null)"
+  if [[ "$env_mode" =~ ^[0-7]+$ ]]; then
+    if (( (8#$env_mode & 077) != 0 )); then
+      check_warn "alias/.env grants group or other access — run chmod 600 $(shell_config_ref "$ENV_FILE" tilde)"
+    else
+      check_pass "alias/.env permissions restrict access to its owner"
+    fi
+  else
+    check_warn "Could not inspect alias/.env permissions"
+  fi
+else
+  check_warn "alias/.env is missing — run install.sh to create it from alias/.env.example"
+fi
+
+if has_local_value CLICKUP_API_TOKEN; then
+  check_pass "ClickUp API token is configured"
+else
+  check_warn "ClickUp integration is not configured; submit-pr and create-clickup-task can run without ClickUp"
+fi
+
+if has_local_value GIT_WORK_NAME && has_local_value GIT_WORK_EMAIL; then
+  check_pass "Work Git identity is configured for config-git"
+else
+  check_warn "GIT_WORK_NAME and GIT_WORK_EMAIL are optional; config-git is unavailable until both are configured"
+fi
+
+# --- Summary ---
+echo ""
+echo "Summary:"
+echo "  ✅ $pass_count passed"
+echo "  ⚠️  $warn_count warnings"
+echo "  ❌ $fail_count failures"
+
+if [ "$fail_count" -eq 0 ]; then
+  echo ""
+  echo "🎉 Core dotfiles setup looks good."
+  exit 0
+fi
+
+echo ""
+echo "❌ Dotfiles setup needs attention."
+exit 1

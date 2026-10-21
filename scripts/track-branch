@@ -1,0 +1,190 @@
+#!/bin/bash
+# Description: Prepare an existing remote branch as a local tracking branch
+
+usage() {
+  echo "Usage: track-branch [branch | origin/branch]"
+}
+
+if [ "$#" -gt 1 ]; then
+  usage
+  exit 2
+fi
+
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+  echo "❌ Not inside a Git working tree."
+  exit 1
+fi
+
+if ! git remote | grep -Fxq origin; then
+  echo "❌ This repository has no 'origin' remote."
+  exit 1
+fi
+
+echo "🔄 Fetching origin and pruning stale remote refs..."
+if ! git fetch origin --prune; then
+  echo "❌ Could not refresh remote refs from origin."
+  exit 1
+fi
+
+select_remote_branch() {
+  local ref branch selection status
+  local -a branches
+  branches=()
+
+  while IFS= read -r ref; do
+    branch="${ref#refs/remotes/origin/}"
+    case "$branch" in
+      HEAD|main|master|develop) continue ;;
+    esac
+    branches+=("$branch")
+  done < <(git for-each-ref --format='%(refname)' refs/remotes/origin)
+
+  if [ "${#branches[@]}" -eq 0 ]; then
+    echo "❌ No selectable branches found on origin (main, master, and develop are hidden)."
+    return 2
+  fi
+
+  if command -v fzf &>/dev/null; then
+    selection="$(printf '%s\n' "${branches[@]}" | fzf \
+      --prompt='Branch > ' \
+      --height=~50% \
+      --layout=reverse \
+      --border \
+      --header='Select an origin branch  (Esc to cancel)')"
+    status=$?
+
+    if [ "$status" -eq 0 ] && [ -n "$selection" ]; then
+      SELECTED_BRANCH="$selection"
+      return 0
+    fi
+    if [ "$status" -eq 1 ] || [ "$status" -eq 130 ]; then
+      return 1
+    fi
+
+    echo "❌ fzf could not select a branch."
+    return 2
+  fi
+
+  echo "Remote branches on origin:"
+  local i
+  for i in "${!branches[@]}"; do
+    printf "  %d) %s\n" "$((i + 1))" "${branches[$i]}"
+  done
+  printf "Select a branch number, or q to cancel: "
+  if ! read -r selection; then
+    return 1
+  fi
+
+  case "$selection" in
+    q|Q|"") return 1 ;;
+    *[!0-9]*)
+      echo "❌ Enter one of the listed branch numbers, or q to cancel."
+      return 2
+      ;;
+  esac
+
+  selection_number=$((10#$selection))
+  if [ "$selection_number" -lt 1 ] || [ "$selection_number" -gt "${#branches[@]}" ]; then
+    echo "❌ Branch number is out of range."
+    return 2
+  fi
+
+  SELECTED_BRANCH="${branches[$((selection_number - 1))]}"
+  return 0
+}
+
+if [ "$#" -eq 0 ]; then
+  select_remote_branch
+  selection_status=$?
+  if [ "$selection_status" -eq 1 ]; then
+    exit 0
+  elif [ "$selection_status" -ne 0 ]; then
+    exit 1
+  fi
+  branch="$SELECTED_BRANCH"
+else
+  branch="$1"
+  case "$branch" in
+    origin/*) branch="${branch#origin/}" ;;
+  esac
+fi
+
+if [ -z "$branch" ] || [ "$branch" = "HEAD" ] || ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
+  echo "❌ Invalid branch name: '$branch'."
+  exit 1
+fi
+
+remote_ref="refs/remotes/origin/$branch"
+if ! git show-ref --verify --quiet "$remote_ref"; then
+  echo "❌ Remote branch 'origin/$branch' does not exist."
+  echo "   Check the branch name and that it is available on origin."
+  exit 1
+fi
+
+# Git reports checked-out branches using refs/heads/<name> in porcelain output.
+checked_out_paths=()
+worktree_path=""
+while IFS= read -r line; do
+  case "$line" in
+    "worktree "*) worktree_path="${line#worktree }" ;;
+    "branch "*)
+      if [ "${line#branch }" = "refs/heads/$branch" ]; then
+        checked_out_paths+=("$worktree_path")
+      fi
+      ;;
+  esac
+done < <(git worktree list --porcelain)
+
+if [ "${#checked_out_paths[@]}" -gt 0 ]; then
+  echo "⚠️  $branch is already checked out in:"
+  for worktree_path in "${checked_out_paths[@]}"; do
+    echo "   $worktree_path"
+  done
+  echo ""
+  echo "Orca cannot reuse the same branch in another worktree until it is no longer checked out there."
+  exit 1
+fi
+
+local_ref="refs/heads/$branch"
+if ! git show-ref --verify --quiet "$local_ref"; then
+  if ! git branch --track -- "$branch" "origin/$branch"; then
+    echo "❌ Could not create local tracking branch '$branch'."
+    exit 1
+  fi
+else
+  upstream_ref="$(git for-each-ref --format='%(upstream)' "$local_ref")"
+  branch_remote="$(git config --get "branch.${branch}.remote" 2>/dev/null || true)"
+  branch_merge="$(git config --get "branch.${branch}.merge" 2>/dev/null || true)"
+
+  if [ -z "$branch_remote" ] && [ -z "$branch_merge" ]; then
+    if ! git branch --set-upstream-to="origin/$branch" -- "$branch"; then
+      echo "❌ Could not set the upstream for local branch '$branch'."
+      exit 1
+    fi
+  elif [ "$branch_remote" = "origin" ] && [ "$branch_merge" = "refs/heads/$branch" ] && [ "$upstream_ref" = "$remote_ref" ]; then
+    : # The existing local branch is already configured correctly.
+  else
+    upstream_short="$(git for-each-ref --format='%(upstream:short)' "$local_ref")"
+    if [ -z "$upstream_short" ]; then
+      if [ -n "$branch_remote" ] && [ -n "$branch_merge" ]; then
+        case "$branch_merge" in
+          refs/heads/*) upstream_short="$branch_remote/${branch_merge#refs/heads/}" ;;
+          *) upstream_short="$branch_remote:$branch_merge" ;;
+        esac
+      else
+        upstream_short="${branch_remote:-<unset>}:${branch_merge:-<unset>}"
+      fi
+    fi
+    echo "❌ Local branch '$branch' already tracks '$upstream_short'."
+    echo "   Expected 'origin/$branch'; its upstream was left unchanged."
+    exit 1
+  fi
+fi
+
+echo "✅ Local tracking branch ready"
+echo ""
+echo "$branch"
+echo "  → origin/$branch"
+echo ""
+echo "Orca:"
+echo "  Create worktree → Branch → $branch → Reuse branch"

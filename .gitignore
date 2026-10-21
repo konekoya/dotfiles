@@ -1,0 +1,7 @@
+.user_alias
+.env
+zsh/.zshrc.local
+# Claude Code permissions are local to this machine/user.
+.claude/settings.local.json
+# Legacy Claude-managed data is moved outside the repo by install.sh.
+claude/skills/synced/

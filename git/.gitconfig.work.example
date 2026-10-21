@@ -1,0 +1,9 @@
+# Work Git identity, applied to Azure DevOps repositories by the includeIf rules
+# in ~/.gitconfig.local. Not used until those rules are uncommented.
+#
+# install.sh copies this file to ~/.gitconfig.work on first run, outside the
+# repository. Uncomment and fill in your work identity.
+
+[user]
+	# name = Your Work Name
+	# email = you@company.com
