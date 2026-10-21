@@ -725,7 +725,7 @@ real PR mutations or migrations against your home directory. Coverage includes
 installer idempotency and skill migration, diagnostic accuracy, API failures,
 branch preservation, bookmark quoting, menu cleanup, and the behind-origin check.
 
-GitHub Actions runs these checks on macOS for pushes and pull requests.
+GitHub Actions runs these checks on macOS for pushes to `master` and for pull requests targeting `master`, so a commit on a PR branch is checked once. A newer push to a PR cancels that PR's superseded run; `master` runs are never cancelled.
 
 ## Adding Your Own Aliases
 

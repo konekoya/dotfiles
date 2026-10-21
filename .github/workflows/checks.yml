@@ -2,7 +2,14 @@ name: Checks
 
 on:
   push:
+    branches: [master]
   pull_request:
+    branches: [master]
+
+# One run per PR or ref. Only superseded PR runs are cancelled, so a push to master always finishes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
