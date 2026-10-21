@@ -2,7 +2,15 @@ name: Checks
 
 on:
   push:
+    branches: [master]
   pull_request:
+    branches: [master]
+
+# A PR shares one group, so only its superseded run is cancelled. Every other run (master pushes) gets
+# a unique group: in a shared group GitHub replaces a pending run even with cancel-in-progress false.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
