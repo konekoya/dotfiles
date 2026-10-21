@@ -719,7 +719,7 @@ git diff --check
 for file in tests/*.sh; do /bin/bash "$file" || exit 1; done
 ```
 
-The regression suites require Git, `jq`, Zsh, and Python 3. They use temporary
+The regression suites require Git, `jq`, Zsh, Python 3, and Ruby (preinstalled on macOS; the CI workflow test parses YAML with it). They use temporary
 homes and repositories, API/push shims, and a pseudo-terminal; they do not perform
 real PR mutations or migrations against your home directory. Coverage includes
 installer idempotency and skill migration, diagnostic accuracy, API failures,
