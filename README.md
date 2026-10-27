@@ -462,7 +462,13 @@ Requires the Docker CLI and a running Docker daemon.
 
 ### `sync-branch`
 
-Fetches and prunes `origin`, then considers only local branches whose configured upstream refs are gone. Normal mode deletes a branch only when Git proves its tip is contained in an existing `origin/main`, `origin/master`, or `origin/develop` ref; branches whose merge status cannot be confirmed are preserved. Branches checked out in any worktree are never deleted. Local `main`, `master`, and `develop` branches are protected.
+Fetches and prunes `origin`, then considers only local branches whose configured upstream refs are gone. A gone upstream alone does not prove a merge (the branch may have been abandoned), and squash or rebase merges never put the branch's commits into the base history. Normal mode therefore deletes a branch only when one of these holds against an existing `origin/main`, `origin/master`, or `origin/develop` ref, checked in this order:
+
+1. The branch tip is contained in the base history.
+2. For an Azure DevOps `origin`, a completed PR from that branch into the base was merged at exactly the branch's current tip (looked up with `ado-rest`). Commits added after the merge keep the branch.
+3. Merging the branch into the base changes nothing, so every change is already present in its content. A later edit to the same lines on the base makes this fail and keeps the branch.
+
+Branches that none of these confirm are preserved. If the PR lookup fails (no profile, offline), the run says so and falls back to the content check. Branches checked out in any worktree are never deleted. Local `main`, `master`, and `develop` branches are protected. The content check needs Git 2.38 or newer; older Git keeps the branch.
 
 ```sh
 sync-branch                 # delete only confirmed-merged stale branches
