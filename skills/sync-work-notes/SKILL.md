@@ -22,12 +22,13 @@ if git -C "$NOTES_DIR" pull --rebase --autostash --quiet >/dev/null 2>&1; then e
 
 - Missing: tell the user to set `WORK_NOTES_REPO` in `alias/.env` and run `install.sh`; stop.
 - Pull failed: show `git -C "$NOTES_DIR" status --short` and stop. Do not resolve conflicts in notes without asking, and never force-push.
-- Start-of-work request (only pulling): report `git -C "$NOTES_DIR" log --oneline "$BEFORE"..HEAD` when the pull brought commits (run it in the same shell as the pull), then stop.
+- Start-of-work request (only pulling): report `git -C "$NOTES_DIR" log --oneline "$BEFORE"..HEAD` when the pull brought commits (run it in the same shell as the pull), read the board or status file if the README defines one, then stop.
 
 ## 2. Update the notes
 
 Read `$NOTES_DIR/README.md` first; its rules and layout override anything here. Then record only facts from this session or from tools you checked in it:
 
+- Handoff state, if the README defines a board or status file: rewrite it to the current unfinished work, who is on it, what it waits for, and next steps.
 - Decisions agreed with other people or teams, with date and references (task IDs, PR numbers).
 - Progress for the current report period (merged or opened PRs, task status changes).
 - Memory: if your tool keeps its memory inside the notes (for Claude Code, a symlinked project memory directory), it is already there; update or add entries per your memory rules for preferences, corrections, and reusable procedures learned this session. Other tools skip this.
