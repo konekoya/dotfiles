@@ -49,7 +49,8 @@ To also install missing command-line tools with Homebrew (see [Dependencies](#de
 
 6. **Tokens.** Fill in `alias/.env` (see [Tokens & Local Configuration](#tokens--local-configuration)): `CLICKUP_API_TOKEN`, Azure DevOps profile PATs if needed, and the work identity for `config-git`.
 7. **Git identity.** Edit `~/.gitconfig.local` with your name and email, and enable the Azure DevOps rules if you use a separate work identity (see [Git Config](#git-config)).
-8. **Verify.** Run `doctor`; every line should pass or explain what is left.
+8. **Work notes (optional).** Set `WORK_NOTES_REPO` in `alias/.env` and run `./install.sh` again; it needs the SSH key from step 3 (see [Work notes](#work-notes)).
+9. **Verify.** Run `doctor`; every line should pass or explain what is left.
 
 ## What `install.sh` does
 
@@ -63,6 +64,7 @@ To also install missing command-line tools with Homebrew (see [Dependencies](#de
 - Creates `zsh/.zshrc.local` from `zsh/.zshrc.local.example` if it doesn't exist (per-machine zsh overrides, not tracked)
 - With `--install-deps`, runs `brew bundle` on `Brewfile` to install missing Homebrew packages; without the flag it ends with a tip about the option. Skipped with a warning when Homebrew is not installed
 - With `--install-deps`, clones oh-my-zsh into `~/.oh-my-zsh` when that path does not exist, before the plugin clones below. It uses `git clone` rather than the official installer because that installer replaces `~/.zshrc`; an existing `~/.oh-my-zsh` is never touched
+- Clones the optional private work-notes repository from `WORK_NOTES_REPO` when its directory is missing, then links what its `links.tsv` lists. Existing paths are preserved, and a failed clone is reported without printing the URL (see [Work notes](#work-notes))
 - Adds missing alias, `zsh/.zshrc.shared`, and scripts PATH configuration to `~/.zshrc`; commented settings and commands that merely mention these paths do not count
 
 ## Shared zsh and prompt
@@ -146,6 +148,7 @@ Repository-managed skills:
 | `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals and current checks, then close out ClickUp (Azure DevOps) and worktrees |
 | `squash-git-commits` | Squash feature-branch commits into one relative to the selected PR or repository target branch |
 | `summarize-pr` | Summarize branch changes and update the Azure DevOps PR description |
+| `sync-work-notes` | Pull the private work notes, update decisions, reports, and memory from the current session, then commit and push |
 
 To add a shared skill, create `~/dotfiles/skills/my-skill/SKILL.md` and run `./install.sh`. The installer creates all four per-skill links; no manual links are needed.
 
@@ -243,6 +246,38 @@ shell blocking is bypassable and can break legitimate workflows. Post-output
 redaction cannot undo disclosure already captured upstream. This installation
 adds no hooks, permission changes, subprocess interception, or output rewriting.
 
+## Work notes
+
+Working notes that should follow you between machines but must not be public (project decisions, weekly reports, Claude Code project memory) live in a separate private repository. This repository stays the entry point: it knows how to fetch the notes and where to link them, while the notes repository owns its own content and layout.
+
+Configure it in `alias/.env`:
+
+```sh
+export WORK_NOTES_REPO="git@github.com:<you>/work-notes.git"   # SSH; never embed a token in the URL
+# export WORK_NOTES_DIR="$HOME/work-notes"                     # default
+```
+
+`install.sh` clones the repository when `WORK_NOTES_DIR` does not exist, then reads `links.tsv` at its root. Each line has three whitespace-separated fields; `#` starts a comment:
+
+```text
+# kind          source            target
+home            impress/weekly    work/impress-weekly
+claude-memory   impress/memory    code/my-project
+```
+
+- `home` links `$HOME/<target>` to `<source>` in the notes.
+- `claude-memory` links Claude Code's memory directory for the project at `$HOME/<target>` (`~/.claude/projects/<encoded path>/memory`) to `<source>`, so the assistant keeps its project memory on every machine. The project must be cloned at the same path relative to `$HOME`.
+- Sources are relative to the notes root and targets relative to `$HOME`; absolute paths and `..` are rejected.
+- A machine that keeps a project somewhere else adds `links.local.tsv` next to `links.tsv`, in the same format. Keep it out of Git with the notes repository's `.gitignore`, and commit a commented `links.local.tsv.example` there so each machine can copy it. Remove the old link before switching paths, because `install.sh` never replaces an existing one. A local entry replaces every shared entry with the same source, so the shared manifest keeps the common default path:
+
+  ```text
+  claude-memory   impress/memory    code/my-project
+  ```
+
+Existing targets are never replaced. To move an existing Claude memory directory into the notes, copy its files into the source directory, remove the original directory, and run `./install.sh` again. `doctor` fetches the notes and reports missing links, uncommitted notes, commits that are not pushed yet, and commits from another machine that are not pulled yet. The `sync-work-notes` skill pulls, updates the notes from the current session, commits, and pushes; run it at the end of a work session.
+
+Keep secrets out of the notes exactly as in this repository: tokens stay in `alias/.env`, and remote URLs with credentials are never written down. The notes repository's own README describes what belongs in it.
+
 ## Aliases
 
 Aliases live in `alias/` and are loaded via `alias/.alias`:
@@ -285,7 +320,7 @@ All scripts are in `scripts/` and available on `$PATH` after installation.
 
 ### `doctor`
 
-Checks symlinks (including the starship config), shared skills, shell config, PATH, optional dependencies, and Oh My Zsh plugin files.
+Checks symlinks (including the starship config), shared skills, shell config, PATH, optional dependencies, Oh My Zsh plugin files, and the optional work notes (links from `links.tsv` and `links.local.tsv`, uncommitted changes, and unpushed commits; it fetches the notes the same way as the repository below and warns when another machine pushed changes you have not pulled).
 Core setup failures produce a non-zero exit code; missing optional tools and
 configuration are reported as warnings.
 Shell checks recognize standalone `source`/`.` commands and `PATH` assignments

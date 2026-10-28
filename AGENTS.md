@@ -81,6 +81,10 @@ When renaming a repository skill, update its callers and documentation, and migr
 
 `agents/security.md` is the canonical global credential policy. The marked block above is an exact mirror so repository instruction loading needs no implicit import. Update both together; `tests/agent-policy-regression.sh` checks equality. `lib/agent-policy.sh` shares native target metadata and preservation checks between the installer and doctor. Global policy diagnostics inspect filesystem metadata only; missing optional coverage is a warning.
 
+### Work notes
+
+`lib/work-notes.sh` supports an optional private notes repository (`WORK_NOTES_REPO`, cloned to `WORK_NOTES_DIR`, default `~/work-notes`). `install.sh` clones it and links the entries of its root `links.tsv`, with entries of the machine-local `links.local.tsv` replacing shared entries that have the same source; `doctor` checks those links, fetches the notes, and reports their sync state. The `sync-work-notes` skill updates, commits, and pushes them. This public repository holds only the generic mechanism: never add organization names, project paths, notes content, or the notes repository URL here. When the user asks to record decisions, preferences, or reports that belong to a project, put them in the notes repository and follow its README; when a new machine needs them, they arrive through `install.sh`.
+
 ### `Brewfile`
 
 Homebrew packages in two categories: runtime dependencies of the scripts and shell config, and a workstation baseline wanted on every development Mac (for example `gawk` and `pyenv`) that the repository does not itself invoke. `doctor` checks only tools that affect dotfiles functionality; it does not need to warn about every baseline package. `install.sh --install-deps` runs `brew bundle` on it; the step is opt-in and must stay non-fatal when Homebrew is missing or a package fails. The same flag clones oh-my-zsh with `git clone`; never use the official oh-my-zsh installer, which replaces `~/.zshrc`.

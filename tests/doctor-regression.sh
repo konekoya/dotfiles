@@ -36,6 +36,7 @@ setup_fixture() {
   mkdir -p "$TEST_DOTFILES/agents" || fail "could not create policy directory"
   cp "$REPO_ROOT/agents/security.md" "$TEST_DOTFILES/agents/" || fail "could not copy policy"
   cp "$REPO_ROOT/lib/shell-config.sh" "$TEST_DOTFILES/lib/" || fail "could not copy shell helpers for $name"
+  cp "$REPO_ROOT/lib/local-env.sh" "$REPO_ROOT/lib/work-notes.sh" "$TEST_DOTFILES/lib/" || fail "could not copy work notes helpers for $name"
   cp "$REPO_ROOT/git/.gitconfig" "$TEST_DOTFILES/git/.gitconfig" || fail "could not copy git config for $name"
   cp "$REPO_ROOT/git/.gitignore_global" "$TEST_DOTFILES/git/.gitignore_global" || fail "could not copy gitignore for $name"
   printf '# sample skill\n' > "$TEST_SKILL/SKILL.md"
@@ -51,7 +52,7 @@ source "$HOME/dotfiles/alias/.alias"
 export PATH="$HOME/dotfiles/scripts:$PATH"
 EOF
 
-  for tool in grep readlink tr awk stat dirname find git zsh; do
+  for tool in grep readlink tr awk stat dirname find git zsh sed; do
     if [ ! -e "$TEST_BIN/$tool" ]; then
       tool_path="$(command -v "$tool")" || fail "required test utility '$tool' is unavailable"
       ln -s "$tool_path" "$TEST_BIN/$tool" || fail "could not add '$tool' to test PATH"
@@ -394,6 +395,8 @@ run_doctor \
   GIT_WORK_NAME=environment-name-secret \
   GIT_WORK_EMAIL=environment-email-secret \
   CLICKUP_API_TOKEN=environment-clickup-secret \
+  WORK_NOTES_REPO=environment-notes-secret \
+  WORK_NOTES_DIR="$TEST_HOME/work-notes" \
   > "$TEST_CASE_DIR/output" 2>&1
 status=$?
 [ "$status" -eq 0 ] || fail "environment configuration returned status $status"
@@ -403,6 +406,7 @@ grep -Fq 'PASS: ClickUp API token is configured' "$TEST_CASE_DIR/output" || fail
 assert_secret_not_printed environment-name-secret
 assert_secret_not_printed environment-email-secret
 assert_secret_not_printed environment-clickup-secret
+assert_secret_not_printed environment-notes-secret
 assert_secret_not_printed dotenv-name-secret
 assert_secret_not_printed dotenv-email-secret
 assert_secret_not_printed dotenv-clickup-secret
@@ -518,5 +522,68 @@ grep -Fq 'PASS: dotfiles is up to date with origin/main' "$TEST_CASE_DIR/tty-out
 setup_fixture not-a-repo
 run_doctor > "$TEST_CASE_DIR/output" 2>&1
 grep -Fq 'Repository' "$TEST_CASE_DIR/output" && fail "repository check ran outside a Git checkout"
+
+# Work notes are optional; a configured but missing checkout is reported without its URL.
+setup_fixture work-notes-unconfigured
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+grep -Fq 'WARN: Work notes are optional and not configured' "$TEST_CASE_DIR/output" || fail "unconfigured work notes were not reported"
+
+setup_fixture work-notes-missing
+run_doctor WORK_NOTES_REPO="git@example.invalid:placeholder/notes.git" > "$TEST_CASE_DIR/output" 2>&1
+grep -Fq 'WARN: WORK_NOTES_REPO is set but ~/work-notes is missing' "$TEST_CASE_DIR/output" || fail "missing work notes checkout was not reported"
+assert_secret_not_printed "placeholder/notes.git"
+
+# A synced checkout passes; unlinked targets, local changes, and unpushed commits warn.
+setup_fixture work-notes-present
+WORK_NOTES_ORIGIN="$TEST_CASE_DIR/work-notes-origin.git"
+WORK_NOTES="$TEST_HOME/work-notes"
+git init -q --bare "$WORK_NOTES_ORIGIN" || fail "could not create work notes origin"
+git init -q "$WORK_NOTES" || fail "could not create work notes checkout"
+mkdir -p "$WORK_NOTES/impress/weekly" "$WORK_NOTES/impress/memory" || fail "could not create work notes content"
+printf 'report\n' > "$WORK_NOTES/impress/weekly/report.html"
+printf '# memory\n' > "$WORK_NOTES/impress/memory/MEMORY.md"
+printf 'home impress/weekly notes/weekly\nclaude-memory impress/memory code/sample-project\n' > "$WORK_NOTES/links.tsv"
+git -C "$WORK_NOTES" add -A &&
+  git -C "$WORK_NOTES" -c user.name=Test -c user.email=test@example.invalid commit -q -m notes &&
+  git -C "$WORK_NOTES" remote add origin "$WORK_NOTES_ORIGIN" &&
+  git -C "$WORK_NOTES" push -q -u origin HEAD >/dev/null 2>&1 || fail "could not publish work notes"
+mkdir -p "$TEST_HOME/notes" && ln -s "$WORK_NOTES/impress/weekly" "$TEST_HOME/notes/weekly" || fail "could not link weekly notes"
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+grep -Fq 'PASS: Work notes repository is present at ~/work-notes' "$TEST_CASE_DIR/output" || fail "work notes checkout was not recognized"
+grep -Fq 'PASS: ~/notes/weekly is linked to work notes' "$TEST_CASE_DIR/output" || fail "linked work notes path was not recognized"
+grep -Fq 'PASS: Work notes have no uncommitted changes' "$TEST_CASE_DIR/output" || fail "clean work notes were not recognized"
+grep -Fq 'PASS: Work notes are up to date with their remote' "$TEST_CASE_DIR/output" || fail "synced work notes were not recognized"
+grep -Fq "WARN: ~/.claude/projects/" "$TEST_CASE_DIR/output" || fail "unlinked Claude memory was not reported"
+grep -Fq "memory is not linked to work notes — run install.sh" "$TEST_CASE_DIR/output" || fail "unlinked Claude memory had no guidance"
+
+printf 'draft\n' > "$WORK_NOTES/impress/draft.md"
+git -C "$WORK_NOTES" add -A && git -C "$WORK_NOTES" -c user.name=Test -c user.email=test@example.invalid commit -q -m draft || fail "could not commit work notes draft"
+printf 'more\n' > "$WORK_NOTES/impress/more.md"
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+grep -Fq 'WARN: Work notes have 1 uncommitted change(s)' "$TEST_CASE_DIR/output" || fail "uncommitted work notes were not reported"
+grep -Fq 'WARN: Work notes have 1 unpushed commit(s)' "$TEST_CASE_DIR/output" || fail "unpushed work notes were not reported"
+
+# doctor fetches the notes, so a push from another machine shows up as behind.
+OTHER_MACHINE="$TEST_CASE_DIR/other-machine"
+git clone -q "$WORK_NOTES_ORIGIN" "$OTHER_MACHINE" >/dev/null 2>&1 || fail "could not clone work notes for another machine"
+printf 'remote\n' > "$OTHER_MACHINE/impress/remote.md"
+git -C "$OTHER_MACHINE" add -A &&
+  git -C "$OTHER_MACHINE" -c user.name=Test -c user.email=test@example.invalid commit -q -m remote &&
+  git -C "$OTHER_MACHINE" push -q >/dev/null 2>&1 || fail "could not push work notes from another machine"
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+grep -Fq 'WARN: Work notes are 1 commit(s) behind their remote — run git pull' "$TEST_CASE_DIR/output" || fail "work notes behind the remote were not reported"
+grep -Fq 'WARN: Work notes have 1 unpushed commit(s)' "$TEST_CASE_DIR/output" || fail "diverged work notes lost the unpushed warning"
+
+# A machine-local links.local.tsv replaces the shared entry with the same source.
+setup_fixture work-notes-local-override
+WORK_NOTES="$TEST_HOME/work-notes"
+mkdir -p "$WORK_NOTES/impress/memory" || fail "could not create work notes content"
+printf 'claude-memory impress/memory code/shared-path\n' > "$WORK_NOTES/links.tsv"
+printf 'claude-memory impress/memory elsewhere/project\n' > "$WORK_NOTES/links.local.tsv"
+LOCAL_MEMORY="$TEST_HOME/.claude/projects/$(printf '%s' "$TEST_HOME/elsewhere/project" | sed 's/[^A-Za-z0-9]/-/g')/memory"
+mkdir -p "$(dirname "$LOCAL_MEMORY")" && ln -s "$WORK_NOTES/impress/memory" "$LOCAL_MEMORY" || fail "could not link local memory"
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+grep -Fq 'memory is linked to work notes (local override)' "$TEST_CASE_DIR/output" || fail "local override link was not recognized"
+grep -Fq 'shared-path' "$TEST_CASE_DIR/output" && fail "overridden shared entry was still checked"
 
 echo "doctor regression checks passed"

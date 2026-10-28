@@ -30,6 +30,7 @@ setup_fixture() {
   mkdir -p "$TEST_DOTFILES/agents" || fail "could not create policy directory"
   cp "$REPO_ROOT/agents/security.md" "$TEST_DOTFILES/agents/" || fail "could not copy policy"
   cp "$REPO_ROOT/lib/shell-config.sh" "$TEST_DOTFILES/lib/" || fail "could not copy shell helpers"
+  cp "$REPO_ROOT/lib/local-env.sh" "$REPO_ROOT/lib/work-notes.sh" "$TEST_DOTFILES/lib/" || fail "could not copy work notes helpers"
   cp "$REPO_ROOT/scripts/doctor" "$TEST_DOTFILES/scripts/doctor" || fail "could not copy doctor for $name"
   cp "$REPO_ROOT/install.sh" "$TEST_DOTFILES/install.sh" || fail "could not copy installer for $name"
   cp "$REPO_ROOT/git/.gitconfig" "$TEST_DOTFILES/git/.gitconfig" || fail "could not copy Git config for $name"
@@ -497,5 +498,80 @@ status=$?
 [ "$status" -ne 0 ] || fail "installer accepted a path with a space"
 grep -Fq 'cannot be written safely' "$TEST_CASE_DIR/output" || fail "unsafe path was not explained"
 [ ! -e "$TEST_HOME/.zshrc" ] || fail "installer changed ~/.zshrc despite an unsafe path"
+
+# Work notes are cloned from WORK_NOTES_REPO and linked from their links.tsv.
+create_work_notes_origin() {
+  WORK_NOTES_ORIGIN="$TEST_CASE_DIR/work-notes-origin"
+  mkdir -p "$WORK_NOTES_ORIGIN/impress/memory" "$WORK_NOTES_ORIGIN/impress/weekly" || fail "could not create work notes origin"
+  printf '# memory\n' > "$WORK_NOTES_ORIGIN/impress/memory/MEMORY.md"
+  printf 'report\n' > "$WORK_NOTES_ORIGIN/impress/weekly/report.html"
+  cat > "$WORK_NOTES_ORIGIN/links.tsv" <<'EOF'
+# kind          source           target
+claude-memory   impress/memory   code/sample-project
+home            impress/weekly   notes/weekly
+home            ../escape        escape
+home            missing/path     notes/missing
+sync            impress/weekly   notes/other
+EOF
+  git -C "$WORK_NOTES_ORIGIN" init -q &&
+    git -C "$WORK_NOTES_ORIGIN" add -A &&
+    git -C "$WORK_NOTES_ORIGIN" -c user.name=Test -c user.email=test@example.invalid commit -q -m notes ||
+    fail "could not commit work notes origin"
+}
+
+setup_fixture work-notes
+create_work_notes_origin
+(umask 077; printf 'export WORK_NOTES_REPO="%s"\n' "$WORK_NOTES_ORIGIN" > "$TEST_DOTFILES/alias/.env") || fail "could not configure work notes"
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "installer failed with work notes"
+MEMORY_LINK="$TEST_HOME/.claude/projects/$(printf '%s' "$TEST_HOME/code/sample-project" | sed 's/[^A-Za-z0-9]/-/g')/memory"
+assert_link_target "$MEMORY_LINK" "$TEST_HOME/work-notes/impress/memory"
+assert_link_target "$TEST_HOME/notes/weekly" "$TEST_HOME/work-notes/impress/weekly"
+grep -Fq "Cloned work notes" "$TEST_CASE_DIR/output" || fail "work notes clone was not reported"
+grep -Fq "Skipping links.tsv line 4: paths must be relative" "$TEST_CASE_DIR/output" || fail "escaping work notes path was not rejected"
+[ ! -e "$TEST_HOME/escape" ] && [ ! -L "$TEST_HOME/escape" ] || fail "work notes manifest escaped its root"
+grep -Fq "Skipping links.tsv line 6: unknown kind 'sync'" "$TEST_CASE_DIR/output" || fail "unknown work notes kind was not rejected"
+grep -Fq "missing/path does not exist" "$TEST_CASE_DIR/output" || fail "missing work notes source was not reported"
+[ ! -e "$TEST_HOME/notes/missing" ] && [ ! -L "$TEST_HOME/notes/missing" ] || fail "missing work notes source was linked"
+run_installer > "$TEST_CASE_DIR/second-output" 2>&1 || fail "second installer run failed with work notes"
+grep -Fq "$MEMORY_LINK already linked" "$TEST_CASE_DIR/second-output" || fail "work notes links were not idempotent"
+grep -Fq "Cloned work notes" "$TEST_CASE_DIR/second-output" && fail "existing work notes were cloned again"
+
+# links.local.tsv replaces shared entries with the same source on this machine only.
+setup_fixture work-notes-local-override
+create_work_notes_origin
+(umask 077; printf 'export WORK_NOTES_REPO="%s"\n' "$WORK_NOTES_ORIGIN" > "$TEST_DOTFILES/alias/.env") || fail "could not configure work notes"
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "installer failed before the local override"
+printf 'claude-memory impress/memory elsewhere/project\nhome bad/../path x\n' > "$TEST_HOME/work-notes/links.local.tsv"
+SHARED_MEMORY="$TEST_HOME/.claude/projects/$(printf '%s' "$TEST_HOME/code/sample-project" | sed 's/[^A-Za-z0-9]/-/g')/memory"
+LOCAL_MEMORY="$TEST_HOME/.claude/projects/$(printf '%s' "$TEST_HOME/elsewhere/project" | sed 's/[^A-Za-z0-9]/-/g')/memory"
+unlink "$SHARED_MEMORY" || fail "could not reset the shared memory link"
+run_installer > "$TEST_CASE_DIR/override-output" 2>&1 || fail "installer failed with a local override"
+assert_link_target "$LOCAL_MEMORY" "$TEST_HOME/work-notes/impress/memory"
+[ ! -e "$SHARED_MEMORY" ] && [ ! -L "$SHARED_MEMORY" ] || fail "overridden shared entry was still linked"
+assert_link_target "$TEST_HOME/notes/weekly" "$TEST_HOME/work-notes/impress/weekly"
+grep -Fq "Skipping links.local.tsv line 2: paths must be relative" "$TEST_CASE_DIR/override-output" || fail "invalid local entry was not reported"
+
+# An existing real memory directory is preserved with migration guidance.
+setup_fixture work-notes-existing-memory
+create_work_notes_origin
+(umask 077; printf 'export WORK_NOTES_REPO="%s"\n' "$WORK_NOTES_ORIGIN" > "$TEST_DOTFILES/alias/.env") || fail "could not configure work notes"
+MEMORY_LINK="$TEST_HOME/.claude/projects/$(printf '%s' "$TEST_HOME/code/sample-project" | sed 's/[^A-Za-z0-9]/-/g')/memory"
+mkdir -p "$MEMORY_LINK" && printf 'local\n' > "$MEMORY_LINK/local.md" || fail "could not create existing memory"
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "installer failed with an existing memory directory"
+[ -d "$MEMORY_LINK" ] && [ ! -L "$MEMORY_LINK" ] && [ -f "$MEMORY_LINK/local.md" ] || fail "existing memory directory was replaced"
+grep -Fq "is a real directory; move its files into" "$TEST_CASE_DIR/output" || fail "memory migration guidance was missing"
+
+# Without configuration nothing is cloned; a failed clone hides the repository URL.
+setup_fixture work-notes-unconfigured
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "installer failed without work notes"
+grep -Fq "Work notes are not configured" "$TEST_CASE_DIR/output" || fail "unconfigured work notes were not reported"
+[ ! -e "$TEST_HOME/work-notes" ] || fail "work notes were created without configuration"
+
+setup_fixture work-notes-clone-failure
+(umask 077; printf 'export WORK_NOTES_REPO="%s"\n' "$TEST_CASE_DIR/private-token-placeholder-repo" > "$TEST_DOTFILES/alias/.env") || fail "could not configure work notes"
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "installer failed when the work notes clone failed"
+grep -Fq "Could not clone work notes" "$TEST_CASE_DIR/output" || fail "work notes clone failure was not reported"
+grep -Fq "private-token-placeholder-repo" "$TEST_CASE_DIR/output" && fail "work notes repository URL was printed"
+[ ! -e "$TEST_HOME/work-notes" ] || fail "failed clone left a work notes directory"
 
 echo "install regression checks passed"

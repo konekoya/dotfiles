@@ -7,6 +7,8 @@ DOTFILES_DIR="$(cd "$SCRIPT_DIR/.." && pwd)" || exit 1
 ENV_FILE="$DOTFILES_DIR/alias/.env"
 source "$DOTFILES_DIR/lib/shell-config.sh" || exit 1
 source "$DOTFILES_DIR/lib/agent-policy.sh" || exit 1
+source "$DOTFILES_DIR/lib/local-env.sh" || exit 1
+source "$DOTFILES_DIR/lib/work-notes.sh" || exit 1
 PASS="✅ PASS"
 WARN="⚠️ WARN"
 FAIL="❌ FAIL"
@@ -86,6 +88,40 @@ has_local_value() {
     source "$ENV_FILE" >/dev/null 2>&1 || true
     [ -n "${!variable_name}" ]
   )
+}
+
+fetch_repository() {
+  # Refresh the remote state so the comparison is current; never prompt, and give up quickly offline.
+  GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5" \
+    git -C "$1" -c http.lowSpeedLimit=1 -c http.lowSpeedTime=5 fetch --quiet 2>/dev/null
+}
+
+# fetch_with_progress DIR LABEL: fetches DIR and sets fetched=true on success.
+fetch_with_progress() {
+  local dir="$1"
+  local label="$2"
+  local fetch_pid
+  local frame=0
+  local spinner_frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+
+  fetched=false
+  if [ -t 1 ]; then
+    # Show a spinner on a terminal; piped output stays free of progress noise.
+    fetch_repository "$dir" &
+    fetch_pid=$!
+    trap 'kill "$fetch_pid" 2>/dev/null; printf "\r\033[2K"; exit 130' INT
+    while kill -0 "$fetch_pid" 2>/dev/null; do
+      printf '\r  %s Checking %s for updates...' "${spinner_frames[frame % 10]}" "$label"
+      frame=$((frame + 1))
+      sleep 0.1
+    done
+    printf '\r\033[2K'
+    trap - INT
+    wait "$fetch_pid" && fetched=true
+  elif fetch_repository "$dir"; then
+    fetched=true
+  fi
+  return 0
 }
 
 echo "🩺 Dotfiles Doctor"
@@ -262,31 +298,7 @@ if git -C "$DOTFILES_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 &&
    upstream="$(git -C "$DOTFILES_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
   section "Repository"
 
-  fetch_upstream() {
-    # Refresh the remote state so the comparison is current; never prompt, and give up quickly offline.
-    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5" \
-      git -C "$DOTFILES_DIR" -c http.lowSpeedLimit=1 -c http.lowSpeedTime=5 fetch --quiet 2>/dev/null
-  }
-
-  fetched=false
-  if [ -t 1 ]; then
-    # Show a spinner on a terminal; piped output stays free of progress noise.
-    spinner_frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
-    fetch_upstream &
-    fetch_pid=$!
-    trap 'kill "$fetch_pid" 2>/dev/null; printf "\r\033[2K"; exit 130' INT
-    frame=0
-    while kill -0 "$fetch_pid" 2>/dev/null; do
-      printf '\r  %s Checking %s for updates...' "${spinner_frames[frame % 10]}" "$upstream"
-      frame=$((frame + 1))
-      sleep 0.1
-    done
-    printf '\r\033[2K'
-    trap - INT
-    wait "$fetch_pid" && fetched=true
-  elif fetch_upstream; then
-    fetched=true
-  fi
+  fetch_with_progress "$DOTFILES_DIR" "$upstream"
 
   behind="$(git -C "$DOTFILES_DIR" rev-list --count 'HEAD..@{u}' 2>/dev/null)" || behind=0
   if [ "$behind" -gt 0 ]; then
@@ -434,6 +446,79 @@ if has_local_value GIT_WORK_NAME && has_local_value GIT_WORK_EMAIL; then
   check_pass "Work Git identity is configured for config-git"
 else
   check_warn "GIT_WORK_NAME and GIT_WORK_EMAIL are optional; config-git is unavailable until both are configured"
+fi
+
+# --- Work Notes ---
+section "Work Notes"
+
+local_env_load WORK_NOTES_REPO WORK_NOTES_DIR
+work_notes_path="$(work_notes_dir)"
+work_notes_ref="$(shell_config_ref "$work_notes_path" tilde)"
+
+if [ ! -d "$work_notes_path" ]; then
+  if [ -e "$work_notes_path" ] || [ -L "$work_notes_path" ]; then
+    check_warn "$work_notes_ref exists but is not a directory"
+  elif [ -n "${WORK_NOTES_REPO:-}" ]; then
+    check_warn "WORK_NOTES_REPO is set but $work_notes_ref is missing — run install.sh once Git can reach the repository"
+  else
+    check_warn "Work notes are optional and not configured; set WORK_NOTES_REPO in alias/.env to use them"
+  fi
+else
+  if git -C "$work_notes_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    check_pass "Work notes repository is present at $work_notes_ref"
+
+    work_notes_changes="$(git -C "$work_notes_path" status --porcelain 2>/dev/null | grep -c .)"
+    if [ "$work_notes_changes" -gt 0 ]; then
+      check_warn "Work notes have $work_notes_changes uncommitted change(s) — commit and push them so other machines get them"
+    else
+      check_pass "Work notes have no uncommitted changes"
+    fi
+
+    if ! git -C "$work_notes_path" rev-parse --verify --quiet '@{upstream}' >/dev/null 2>&1; then
+      check_warn "Work notes branch has no upstream — push it with git push -u"
+    else
+      fetch_with_progress "$work_notes_path" "work notes"
+      work_notes_ahead="$(git -C "$work_notes_path" rev-list --count '@{upstream}..HEAD' 2>/dev/null)" || work_notes_ahead=0
+      work_notes_behind="$(git -C "$work_notes_path" rev-list --count 'HEAD..@{upstream}' 2>/dev/null)" || work_notes_behind=0
+      if [ "$work_notes_behind" -gt 0 ]; then
+        check_warn "Work notes are $work_notes_behind commit(s) behind their remote — run git pull in $work_notes_ref before you start"
+      fi
+      if [ "$work_notes_ahead" -gt 0 ]; then
+        check_warn "Work notes have $work_notes_ahead unpushed commit(s) — run git push in $work_notes_ref"
+      fi
+      if [ "$work_notes_behind" -eq 0 ] && [ "$work_notes_ahead" -eq 0 ]; then
+        if [ "$fetched" = true ]; then
+          check_pass "Work notes are up to date with their remote"
+        else
+          check_warn "Could not reach the work notes remote; in sync as of the last fetch"
+        fi
+      fi
+    fi
+  else
+    check_warn "$work_notes_ref is not a Git repository; its notes are not synced"
+  fi
+
+  if [ ! -f "$work_notes_path/links.tsv" ]; then
+    check_warn "$work_notes_ref has no links.tsv; nothing is linked from it"
+  fi
+  while IFS=$'\t' read -r status source target _kind manifest; do
+    target_ref="$(shell_config_ref "$target" tilde)"
+    if [ "$status" != ok ]; then
+      check_warn "$source is invalid: $target"
+    elif [ -L "$target" ] && [ -e "$target" ] && path_resolves_to "$target" "$source"; then
+      if [ "$manifest" = links.local.tsv ]; then
+        check_pass "$target_ref is linked to work notes (local override)"
+      else
+        check_pass "$target_ref is linked to work notes"
+      fi
+    elif [ ! -e "$source" ]; then
+      check_warn "Work notes path $(shell_config_ref "$source" tilde) is missing; $target_ref is not linked"
+    elif [ -e "$target" ] || [ -L "$target" ]; then
+      check_warn "$target_ref exists but is not linked to $(shell_config_ref "$source" tilde) — move its contents into work notes, remove it, and run install.sh"
+    else
+      check_warn "$target_ref is not linked to work notes — run install.sh"
+    fi
+  done < <(work_notes_entries "$work_notes_path")
 fi
 
 # --- Summary ---

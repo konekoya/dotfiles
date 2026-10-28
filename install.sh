@@ -16,6 +16,8 @@ LEGACY_SKILLS_SOURCE="$DOTFILES_DIR/claude/skills"
 CLAUDE_PLUGIN_SKILLS="skill-creator"
 source "$DOTFILES_DIR/lib/shell-config.sh" || exit 1
 source "$DOTFILES_DIR/lib/agent-policy.sh" || exit 1
+source "$DOTFILES_DIR/lib/local-env.sh" || exit 1
+source "$DOTFILES_DIR/lib/work-notes.sh" || exit 1
 
 install_deps=false
 for arg in "$@"; do
@@ -441,6 +443,44 @@ if [ ! -e "$ZSH_LOCAL_FILE" ] && [ ! -L "$ZSH_LOCAL_FILE" ]; then
   fi
 else
   echo "🐚 $ZSH_LOCAL_FILE already exists, preserving it."
+fi
+
+# Work notes: optional private repository cloned from WORK_NOTES_REPO in alias/.env.
+# Its links.tsv decides what gets linked; existing paths are never replaced.
+local_env_load WORK_NOTES_REPO WORK_NOTES_DIR
+WORK_NOTES_PATH="$(work_notes_dir)"
+if [ ! -e "$WORK_NOTES_PATH" ] && [ ! -L "$WORK_NOTES_PATH" ]; then
+  if [ -z "${WORK_NOTES_REPO:-}" ]; then
+    echo "📒 Work notes are not configured; set WORK_NOTES_REPO in alias/.env to clone them."
+  elif ! command -v git >/dev/null 2>&1; then
+    echo "⚠️  git not found; skipping work notes clone."
+  # Git output is hidden because it can echo the repository URL.
+  elif git clone --quiet -- "$WORK_NOTES_REPO" "$WORK_NOTES_PATH" >/dev/null 2>&1; then
+    echo "📒 Cloned work notes → $WORK_NOTES_PATH"
+  else
+    echo "⚠️  Could not clone work notes into $WORK_NOTES_PATH; check SSH access to the repository and rerun install.sh."
+  fi
+fi
+
+if [ -d "$WORK_NOTES_PATH" ]; then
+  if [ ! -f "$WORK_NOTES_PATH/links.tsv" ]; then
+    echo "📒 $WORK_NOTES_PATH has no links.tsv; nothing to link."
+  fi
+  while IFS=$'\t' read -r status source target _kind _manifest; do
+    if [ "$status" != ok ]; then
+      echo "⚠️  Skipping $source: $target"
+    elif [ ! -e "$source" ]; then
+      echo "⚠️  Work notes path $source does not exist; skipping its link."
+    elif [ -d "$target" ] && [ ! -L "$target" ]; then
+      echo "⚠️  $target is a real directory; move its files into $source, remove it, and rerun install.sh."
+    elif mkdir -p "$(dirname "$target")"; then
+      link_config_file "$source" "$target"
+    else
+      echo "⚠️  Could not create the parent directory of $target."
+    fi
+  done < <(work_notes_entries "$WORK_NOTES_PATH")
+elif [ -e "$WORK_NOTES_PATH" ]; then
+  echo "⚠️  $WORK_NOTES_PATH is not a directory; preserving it and skipping work notes links."
 fi
 
 ZSHRC="$HOME/.zshrc"
