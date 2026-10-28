@@ -6,11 +6,16 @@ usage() {
 Usage: sync-branch [--dry-run] [--force] [--help]
 
 Refresh origin and inspect local branches whose configured upstreams are gone.
-Normal mode deletes only branches proven contained in origin/main, origin/master,
-or origin/develop. --force may delete unmerged candidates. Branches checked out
-in any worktree are always preserved.
+Normal mode deletes only branches proven merged into origin/main, origin/master,
+or origin/develop: contained in its history, merged by a completed Azure DevOps
+PR at the same tip (squash or rebase), or already present in its content.
+--force may delete unproven candidates. Branches checked out in any worktree are
+always preserved.
 EOF
 }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../lib/azure-devops.sh"
 
 dry_run=false
 force=false
@@ -226,6 +231,84 @@ delete_merged_branch() {
   return 1
 }
 
+# A gone upstream does not prove a merge: squash and rebase merges leave the
+# branch's commits out of the base history, so is-ancestor alone misses them.
+# These two checks recognise those merges without trusting the gone upstream.
+pr_lookup_state=untried
+pr_lookup_failed=false
+pr_repo_segment=""
+pr_match_id=""
+pr_match_base=""
+
+init_pr_lookup() {
+  [ "$pr_lookup_state" = untried ] || return 0
+  pr_lookup_state=unavailable
+  command -v jq >/dev/null 2>&1 || return 0
+  [ -x "$SCRIPT_DIR/ado-rest" ] || return 0
+  ado_resolve_remote_context >/dev/null 2>&1 || return 0
+  [ "$ADO_REMOTE_PROVIDER" = azure ] && [ "$ADO_REMOTE_NAME" = origin ] || return 0
+  pr_repo_segment="$(jq -nr --arg v "$ADO_REPO" '$v | @uri')" || return 0
+  pr_lookup_state=ready
+}
+
+# Sets pr_match_id and pr_match_base when a completed PR merged exactly this
+# branch tip into a base ref. A different tip means later local commits.
+find_completed_pr() {
+  local branch="$1" tip="$2" source_ref response id target base_ref
+
+  pr_match_id=""
+  pr_match_base=""
+  init_pr_lookup
+  [ "$pr_lookup_state" = ready ] || return 1
+
+  source_ref="$(jq -nr --arg v "refs/heads/$branch" '$v | @uri')" || return 1
+  if ! response="$("$SCRIPT_DIR/ado-rest" GET "/_apis/git/repositories/${pr_repo_segment}/pullrequests?searchCriteria.status=completed&searchCriteria.sourceRefName=${source_ref}&api-version=7.1" 2>/dev/null)"; then
+    pr_lookup_failed=true
+    return 1
+  fi
+
+  while IFS=$'\t' read -r id target; do
+    [ -n "$id" ] || continue
+    for base_ref in "${base_refs[@]}"; do
+      if [ "refs/heads/${base_ref#refs/remotes/origin/}" = "$target" ]; then
+        pr_match_id="$id"
+        pr_match_base="$base_ref"
+        return 0
+      fi
+    done
+  done < <(printf '%s' "$response" | jq -r --arg tip "$tip" '.value[]? | select(.status == "completed" and .lastMergeSourceCommit.commitId == $tip) | [(.pullRequestId | tostring), .targetRefName] | @tsv' 2>/dev/null)
+  return 1
+}
+
+# Prints the first base ref whose tree already equals the result of merging the
+# branch into it, meaning every change on the branch is present in that base.
+# A later edit to the same lines makes the merge differ, which only skips.
+find_content_base() {
+  local branch="$1" base_ref base_tree merged_tree
+
+  for base_ref in "${base_refs[@]}"; do
+    base_tree="$(git rev-parse --verify --quiet "$base_ref^{tree}")" || continue
+    merged_tree="$(git merge-tree --write-tree "$base_ref" "refs/heads/$branch" 2>/dev/null)" || continue
+    if [ "${merged_tree%%$'\n'*}" = "$base_tree" ]; then
+      printf '%s' "$base_ref"
+      return 0
+    fi
+  done
+  return 1
+}
+
+delete_confirmed_branch() {
+  local branch="$1" how="$2" base_label="$3"
+
+  if [ "$how" = ancestor ]; then
+    delete_merged_branch "$branch" "$base_label"
+  else
+    # Git's own merged check cannot see squash or rebase merges, so it would
+    # refuse; the PR or content proof has already replaced it.
+    git branch -D -- "$branch" >/dev/null
+  fi
+}
+
 echo ""
 printf '%sStale upstream branches:%s\n' "$c_bold" "$c_reset"
 
@@ -291,16 +374,37 @@ for branch in "${candidate_branches[@]}"; do
     fi
   done
 
+  merged_how=""
+  [ -n "$merged_base" ] && merged_how=ancestor
+  merged_id=""
+
+  if [ -z "$merged_base" ] && [ "$merge_check_error" = false ] && [ "${#base_refs[@]}" -gt 0 ]; then
+    branch_tip="$(git rev-parse --verify --quiet "refs/heads/$branch")" || branch_tip=""
+    if [ -n "$branch_tip" ] && find_completed_pr "$branch" "$branch_tip"; then
+      merged_how="pr"
+      merged_base="$pr_match_base"
+      merged_id="$pr_match_id"
+    elif content_base="$(find_content_base "$branch")"; then
+      merged_how=content
+      merged_base="$content_base"
+    fi
+  fi
+
   if [ -n "$merged_base" ]; then
     merged_base_label="origin/${merged_base#refs/remotes/origin/}"
+    case "$merged_how" in
+      pr) merged_note="completed PR #$merged_id merged into $merged_base_label" ;;
+      content) merged_note="changes already present in $merged_base_label (squash or rebase merge)" ;;
+      *) merged_note="merged into $merged_base_label" ;;
+    esac
     if [ "$dry_run" = true ]; then
-      printf '  ✅ %s%s%s\n     %smerged into %s — would delete%s\n' "$c_green" "$branch" "$c_reset" "$c_dim" "$merged_base_label" "$c_reset"
+      printf '  ✅ %s%s%s\n     %s%s — would delete%s\n' "$c_green" "$branch" "$c_reset" "$c_dim" "$merged_note" "$c_reset"
       would_delete_count=$((would_delete_count + 1))
-    elif delete_merged_branch "$branch" "$merged_base_label"; then
-      printf '  ✅ %s%s%s\n     %smerged into %s — deleted%s\n' "$c_green" "$branch" "$c_reset" "$c_dim" "$merged_base_label" "$c_reset"
+    elif delete_confirmed_branch "$branch" "$merged_how" "$merged_base_label"; then
+      printf '  ✅ %s%s%s\n     %s%s — deleted%s\n' "$c_green" "$branch" "$c_reset" "$c_dim" "$merged_note" "$c_reset"
       deleted_count=$((deleted_count + 1))
     else
-      printf '  ❌ %s%s%s\n     %smerged into %s, but Git refused deletion%s\n' "$c_red" "$branch" "$c_reset" "$c_dim" "$merged_base_label" "$c_reset"
+      printf '  ❌ %s%s%s\n     %s%s, but Git refused deletion%s\n' "$c_red" "$branch" "$c_reset" "$c_dim" "$merged_note" "$c_reset"
       failed_count=$((failed_count + 1))
     fi
   elif [ "$force" = true ]; then
@@ -340,6 +444,10 @@ print_summary_line() {
   fi
   printf '  %s%s: %s%s\n' "$color" "$label" "$count" "$c_reset"
 }
+
+if [ "$pr_lookup_failed" = true ]; then
+  printf '\n%sAzure DevOps PR lookup failed; squash merges were checked by content only.%s\n' "$c_dim" "$c_reset"
+fi
 
 echo ""
 printf '%sSummary:%s\n' "$c_bold" "$c_reset"

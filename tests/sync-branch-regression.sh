@@ -36,6 +36,7 @@ assert_branch_merge_config() {
 
 setup_repo() {
   local name="$1"
+  SYNC_BRANCH="$REPO_ROOT/scripts/sync-branch"
   TEST_CASE_DIR="$TEST_ROOT/$name"
   REPO="$TEST_CASE_DIR/repo"
   mkdir -p "$REPO" || fail "could not create repository for $name"
@@ -62,6 +63,11 @@ if [ "${1-}" = branch ] && [ "${2-}" = -d ] && \
   exit 1
 fi
 
+# Lets a fixture whose origin URL looks like Azure DevOps fetch from a local bare repository.
+if [ "${1-}" = fetch ] && [ -n "${SYNC_TEST_ORIGIN:-}" ]; then
+  exec "$SYNC_BRANCH_REAL_GIT" fetch "$SYNC_TEST_ORIGIN" --prune '+refs/heads/*:refs/remotes/origin/*'
+fi
+
 case "${2-}" in
   --set-upstream-to=*)
     "$SYNC_BRANCH_REAL_GIT" "$@"
@@ -84,8 +90,61 @@ run_sync_branch() {
       SYNC_BRANCH_REAL_GIT="$REAL_GIT" \
       SYNC_TEST_FAIL_BRANCH="${SYNC_TEST_FAIL_BRANCH:-}" \
       SYNC_TEST_SIGNAL="${SYNC_TEST_SIGNAL:-}" \
+      SYNC_TEST_ORIGIN="${SYNC_TEST_ORIGIN:-}" \
+      SYNC_TEST_PR_RESPONSE="${SYNC_TEST_PR_RESPONSE:-}" \
+      SYNC_TEST_ADO_LOG="${SYNC_TEST_ADO_LOG:-}" \
+      SYNC_TEST_ADO_FAIL="${SYNC_TEST_ADO_FAIL:-}" \
       "$SYNC_BRANCH" "$@"
   )
+}
+
+# Creates a stale branch whose change reached main as a different commit, the way a
+# squash merge does, so it is not an ancestor of origin/main.
+setup_squashed_branch() {
+  local name="$1" branch='feature/squashed'
+  setup_repo "$name"
+  "$REAL_GIT" -C "$REPO" branch -qD 'release/1.2' || fail "could not remove default stale branch"
+  "$REAL_GIT" -C "$REPO" checkout -q -b "$branch" || fail "could not create $branch"
+  printf 'feature\n' > "$REPO/feature.txt"
+  "$REAL_GIT" -C "$REPO" add feature.txt || fail "could not stage feature"
+  "$REAL_GIT" -C "$REPO" commit -qm "feature commit" || fail "could not commit feature"
+  SQUASHED_TIP="$("$REAL_GIT" -C "$REPO" rev-parse HEAD)"
+  "$REAL_GIT" -C "$REPO" checkout -q main || fail "could not return to main"
+  printf 'feature\n' > "$REPO/feature.txt"
+  "$REAL_GIT" -C "$REPO" add feature.txt || fail "could not stage squash"
+  "$REAL_GIT" -C "$REPO" commit -qm "squash of feature" || fail "could not commit squash"
+  "$REAL_GIT" -C "$REPO" config --local "branch.$branch.remote" origin || fail "could not configure stale remote"
+  "$REAL_GIT" -C "$REPO" config --local "branch.$branch.merge" refs/heads/old-feature/squashed || fail "could not configure stale merge ref"
+}
+
+# Edits the squashed file on main so the branch's change can no longer be proven by content.
+diverge_main() {
+  printf 'changed\n' > "$REPO/feature.txt"
+  "$REAL_GIT" -C "$REPO" commit -qam "later edit" || fail "could not commit later edit"
+}
+
+# Points origin at an Azure DevOps URL (fetched from the local bare repository by the git
+# shim) and runs a copy of the script beside a mocked ado-rest.
+use_ado_origin() {
+  local dotfiles="$TEST_CASE_DIR/dotfiles"
+  mkdir -p "$dotfiles/scripts" || fail "could not create fixture dotfiles"
+  cp "$REPO_ROOT/scripts/sync-branch" "$dotfiles/scripts/sync-branch" || fail "could not copy sync-branch"
+  cp -R "$REPO_ROOT/lib" "$dotfiles/lib" || fail "could not copy lib"
+  cat > "$dotfiles/scripts/ado-rest" <<'EOF'
+#!/bin/bash
+[ -z "${SYNC_TEST_ADO_LOG:-}" ] || printf '%s\n' "$*" >> "$SYNC_TEST_ADO_LOG"
+[ -z "${SYNC_TEST_ADO_FAIL:-}" ] || exit 1
+printf '%s\n' "$SYNC_TEST_PR_RESPONSE"
+EOF
+  chmod +x "$dotfiles/scripts/sync-branch" "$dotfiles/scripts/ado-rest" || fail "could not make fixture scripts executable"
+  "$REAL_GIT" -C "$REPO" remote set-url origin 'https://dev.azure.com/org/proj/_git/repo' || fail "could not set Azure DevOps origin"
+  SYNC_BRANCH="$dotfiles/scripts/sync-branch"
+  SYNC_TEST_ORIGIN="$TEST_CASE_DIR/origin.git"
+  SYNC_TEST_ADO_LOG="$TEST_CASE_DIR/ado.log"
+}
+
+pr_response() {
+  printf '{"value":[{"pullRequestId":42,"status":"completed","targetRefName":"%s","lastMergeSourceCommit":{"commitId":"%s"}}]}' "$2" "$1"
 }
 
 setup_repo stale-dotted-branch
@@ -166,5 +225,60 @@ remaining_merge_values="$("$REAL_GIT" -C "$REPO" config --local --get-all 'branc
 case $'\n'"$remaining_merge_values"$'\n' in
   *$'\nrefs/heads/old-release/1.2\n'*) fail "successful deletion restored the deleted branch's original config" ;;
 esac
+
+setup_squashed_branch squash-content
+"$REAL_GIT" -C "$REPO" push -q origin main || fail "could not push squash"
+run_sync_branch --dry-run > "$TEST_CASE_DIR/output" 2>&1 || fail "squash dry run failed"
+grep -Fq 'changes already present in origin/main' "$TEST_CASE_DIR/output" || fail "dry run did not recognise the squash by content"
+"$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed || fail "squash dry run removed the branch"
+run_sync_branch > "$TEST_CASE_DIR/output" 2>&1 || fail "squash content run failed"
+if "$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed; then
+  fail "squash-merged branch was not deleted"
+fi
+
+setup_squashed_branch squash-diverged
+diverge_main
+"$REAL_GIT" -C "$REPO" push -q origin main || fail "could not push diverged main"
+run_sync_branch > "$TEST_CASE_DIR/output" 2>&1 || fail "diverged run failed"
+grep -Fq 'contains commits not confirmed' "$TEST_CASE_DIR/output" || fail "diverged branch was not reported as unconfirmed"
+"$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed || fail "unprovable branch was deleted"
+
+setup_squashed_branch squash-pr
+diverge_main
+"$REAL_GIT" -C "$REPO" push -q origin main || fail "could not push diverged main"
+use_ado_origin
+SYNC_TEST_PR_RESPONSE="$(pr_response "$SQUASHED_TIP" refs/heads/main)"
+run_sync_branch --dry-run > "$TEST_CASE_DIR/output" 2>&1 || fail "PR dry run failed"
+grep -Fq 'completed PR #42 merged into origin/main' "$TEST_CASE_DIR/output" || fail "dry run did not report the completed PR"
+"$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed || fail "PR dry run removed the branch"
+run_sync_branch > "$TEST_CASE_DIR/output" 2>&1 || fail "PR run failed"
+if "$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed; then
+  fail "branch with a completed PR was not deleted"
+fi
+grep -Fq 'GET /_apis/git/repositories/repo/pullrequests?searchCriteria.status=completed&searchCriteria.sourceRefName=refs%2Fheads%2Ffeature%2Fsquashed&' "$TEST_CASE_DIR/ado.log" || fail "unexpected PR lookup request"
+
+setup_squashed_branch squash-pr-newer-tip
+diverge_main
+"$REAL_GIT" -C "$REPO" push -q origin main || fail "could not push diverged main"
+use_ado_origin
+SYNC_TEST_PR_RESPONSE="$(pr_response 0000000000000000000000000000000000000000 refs/heads/main)"
+run_sync_branch > "$TEST_CASE_DIR/output" 2>&1 || fail "PR tip mismatch run failed"
+"$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed || fail "branch with commits newer than its PR was deleted"
+
+setup_squashed_branch squash-pr-other-target
+diverge_main
+"$REAL_GIT" -C "$REPO" push -q origin main || fail "could not push diverged main"
+use_ado_origin
+SYNC_TEST_PR_RESPONSE="$(pr_response "$SQUASHED_TIP" refs/heads/release/9)"
+run_sync_branch > "$TEST_CASE_DIR/output" 2>&1 || fail "PR target mismatch run failed"
+"$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed || fail "branch merged into a non-primary target was deleted"
+
+setup_squashed_branch squash-pr-lookup-failure
+diverge_main
+"$REAL_GIT" -C "$REPO" push -q origin main || fail "could not push diverged main"
+use_ado_origin
+SYNC_TEST_ADO_FAIL=1 run_sync_branch > "$TEST_CASE_DIR/output" 2>&1 || fail "PR lookup failure run failed"
+grep -Fq 'PR lookup failed' "$TEST_CASE_DIR/output" || fail "run did not report the failed PR lookup"
+"$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed || fail "failed PR lookup deleted the branch"
 
 echo "sync-branch regression checks passed"
