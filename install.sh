@@ -458,7 +458,9 @@ if [ ! -e "$WORK_NOTES_PATH" ] && [ ! -L "$WORK_NOTES_PATH" ]; then
   elif git clone --quiet -- "$WORK_NOTES_REPO" "$WORK_NOTES_PATH" >/dev/null 2>&1; then
     echo "📒 Cloned work notes → $WORK_NOTES_PATH"
   else
-    echo "⚠️  Could not clone work notes into $WORK_NOTES_PATH; check SSH access to the repository and rerun install.sh."
+    echo "⚠️  Could not clone work notes into $WORK_NOTES_PATH."
+    echo "   Verify WORK_NOTES_REPO points to an existing repository your account can access."
+    echo "   Check Git authentication and network connectivity, then rerun ./install.sh."
   fi
 fi
 
