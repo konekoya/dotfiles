@@ -7,6 +7,8 @@ DOTFILES_DIR="$(cd "$SCRIPT_DIR/.." && pwd)" || exit 1
 ENV_FILE="$DOTFILES_DIR/alias/.env"
 source "$DOTFILES_DIR/lib/shell-config.sh" || exit 1
 source "$DOTFILES_DIR/lib/agent-policy.sh" || exit 1
+source "$DOTFILES_DIR/lib/local-env.sh" || exit 1
+source "$DOTFILES_DIR/lib/work-notes.sh" || exit 1
 PASS="✅ PASS"
 WARN="⚠️ WARN"
 FAIL="❌ FAIL"
@@ -434,6 +436,69 @@ if has_local_value GIT_WORK_NAME && has_local_value GIT_WORK_EMAIL; then
   check_pass "Work Git identity is configured for config-git"
 else
   check_warn "GIT_WORK_NAME and GIT_WORK_EMAIL are optional; config-git is unavailable until both are configured"
+fi
+
+# --- Work Notes ---
+section "Work Notes"
+
+local_env_load WORK_NOTES_REPO WORK_NOTES_DIR
+work_notes_path="$(work_notes_dir)"
+work_notes_ref="$(shell_config_ref "$work_notes_path" tilde)"
+
+if [ ! -d "$work_notes_path" ]; then
+  if [ -e "$work_notes_path" ] || [ -L "$work_notes_path" ]; then
+    check_warn "$work_notes_ref exists but is not a directory"
+  elif [ -n "${WORK_NOTES_REPO:-}" ]; then
+    check_warn "WORK_NOTES_REPO is set but $work_notes_ref is missing — run install.sh once Git can reach the repository"
+  else
+    check_warn "Work notes are optional and not configured; set WORK_NOTES_REPO in alias/.env to use them"
+  fi
+else
+  if git -C "$work_notes_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    check_pass "Work notes repository is present at $work_notes_ref"
+
+    work_notes_changes="$(git -C "$work_notes_path" status --porcelain 2>/dev/null | grep -c .)"
+    if [ "$work_notes_changes" -gt 0 ]; then
+      check_warn "Work notes have $work_notes_changes uncommitted change(s) — commit and push them so other machines get them"
+    else
+      check_pass "Work notes have no uncommitted changes"
+    fi
+
+    # Compared with the last fetch only; doctor does not contact the remote.
+    if ! git -C "$work_notes_path" rev-parse --verify --quiet '@{upstream}' >/dev/null 2>&1; then
+      check_warn "Work notes branch has no upstream — push it with git push -u"
+    else
+      work_notes_ahead="$(git -C "$work_notes_path" rev-list --count '@{upstream}..HEAD' 2>/dev/null)"
+      work_notes_behind="$(git -C "$work_notes_path" rev-list --count 'HEAD..@{upstream}' 2>/dev/null)"
+      if [ "${work_notes_ahead:-0}" -gt 0 ]; then
+        check_warn "Work notes have $work_notes_ahead unpushed commit(s) — run git push in $work_notes_ref"
+      elif [ "${work_notes_behind:-0}" -gt 0 ]; then
+        check_warn "Work notes are $work_notes_behind commit(s) behind their upstream — run git pull in $work_notes_ref"
+      else
+        check_pass "Work notes match their upstream as of the last fetch"
+      fi
+    fi
+  else
+    check_warn "$work_notes_ref is not a Git repository; its notes are not synced"
+  fi
+
+  if [ ! -f "$work_notes_path/links.tsv" ]; then
+    check_warn "$work_notes_ref has no links.tsv; nothing is linked from it"
+  fi
+  while IFS=$'\t' read -r status source target _kind; do
+    target_ref="$(shell_config_ref "$target" tilde)"
+    if [ "$status" != ok ]; then
+      check_warn "links.tsv line $source is invalid: $target"
+    elif [ -L "$target" ] && [ -e "$target" ] && path_resolves_to "$target" "$source"; then
+      check_pass "$target_ref is linked to work notes"
+    elif [ ! -e "$source" ]; then
+      check_warn "Work notes path $(shell_config_ref "$source" tilde) is missing; $target_ref is not linked"
+    elif [ -e "$target" ] || [ -L "$target" ]; then
+      check_warn "$target_ref exists but is not linked to $(shell_config_ref "$source" tilde) — move its contents into work notes, remove it, and run install.sh"
+    else
+      check_warn "$target_ref is not linked to work notes — run install.sh"
+    fi
+  done < <(work_notes_entries "$work_notes_path")
 fi
 
 # --- Summary ---
