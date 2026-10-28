@@ -83,7 +83,7 @@ When renaming a repository skill, update its callers and documentation, and migr
 
 ### Work notes
 
-`lib/work-notes.sh` supports an optional private notes repository (`WORK_NOTES_REPO`, cloned to `WORK_NOTES_DIR`, default `~/work-notes`). `install.sh` clones it and links the entries of its root `links.tsv`; `doctor` checks those links and the notes' sync state. This public repository holds only the generic mechanism: never add organization names, project paths, notes content, or the notes repository URL here. When the user asks to record decisions, preferences, or reports that belong to a project, put them in the notes repository and follow its README; when a new machine needs them, they arrive through `install.sh`.
+`lib/work-notes.sh` supports an optional private notes repository (`WORK_NOTES_REPO`, cloned to `WORK_NOTES_DIR`, default `~/work-notes`). `install.sh` clones it and links the entries of its root `links.tsv`, with entries of the machine-local `links.local.tsv` replacing shared entries that have the same source; `doctor` checks those links, fetches the notes, and reports their sync state. The `sync-work-notes` skill updates, commits, and pushes them. This public repository holds only the generic mechanism: never add organization names, project paths, notes content, or the notes repository URL here. When the user asks to record decisions, preferences, or reports that belong to a project, put them in the notes repository and follow its README; when a new machine needs them, they arrive through `install.sh`.
 
 ### `Brewfile`
 

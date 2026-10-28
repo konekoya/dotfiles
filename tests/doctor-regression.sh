@@ -552,7 +552,7 @@ run_doctor > "$TEST_CASE_DIR/output" 2>&1
 grep -Fq 'PASS: Work notes repository is present at ~/work-notes' "$TEST_CASE_DIR/output" || fail "work notes checkout was not recognized"
 grep -Fq 'PASS: ~/notes/weekly is linked to work notes' "$TEST_CASE_DIR/output" || fail "linked work notes path was not recognized"
 grep -Fq 'PASS: Work notes have no uncommitted changes' "$TEST_CASE_DIR/output" || fail "clean work notes were not recognized"
-grep -Fq 'PASS: Work notes match their upstream' "$TEST_CASE_DIR/output" || fail "synced work notes were not recognized"
+grep -Fq 'PASS: Work notes are up to date with their remote' "$TEST_CASE_DIR/output" || fail "synced work notes were not recognized"
 grep -Fq "WARN: ~/.claude/projects/" "$TEST_CASE_DIR/output" || fail "unlinked Claude memory was not reported"
 grep -Fq "memory is not linked to work notes — run install.sh" "$TEST_CASE_DIR/output" || fail "unlinked Claude memory had no guidance"
 
@@ -562,5 +562,28 @@ printf 'more\n' > "$WORK_NOTES/impress/more.md"
 run_doctor > "$TEST_CASE_DIR/output" 2>&1
 grep -Fq 'WARN: Work notes have 1 uncommitted change(s)' "$TEST_CASE_DIR/output" || fail "uncommitted work notes were not reported"
 grep -Fq 'WARN: Work notes have 1 unpushed commit(s)' "$TEST_CASE_DIR/output" || fail "unpushed work notes were not reported"
+
+# doctor fetches the notes, so a push from another machine shows up as behind.
+OTHER_MACHINE="$TEST_CASE_DIR/other-machine"
+git clone -q "$WORK_NOTES_ORIGIN" "$OTHER_MACHINE" >/dev/null 2>&1 || fail "could not clone work notes for another machine"
+printf 'remote\n' > "$OTHER_MACHINE/impress/remote.md"
+git -C "$OTHER_MACHINE" add -A &&
+  git -C "$OTHER_MACHINE" -c user.name=Test -c user.email=test@example.invalid commit -q -m remote &&
+  git -C "$OTHER_MACHINE" push -q >/dev/null 2>&1 || fail "could not push work notes from another machine"
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+grep -Fq 'WARN: Work notes are 1 commit(s) behind their remote — run git pull' "$TEST_CASE_DIR/output" || fail "work notes behind the remote were not reported"
+grep -Fq 'WARN: Work notes have 1 unpushed commit(s)' "$TEST_CASE_DIR/output" || fail "diverged work notes lost the unpushed warning"
+
+# A machine-local links.local.tsv replaces the shared entry with the same source.
+setup_fixture work-notes-local-override
+WORK_NOTES="$TEST_HOME/work-notes"
+mkdir -p "$WORK_NOTES/impress/memory" || fail "could not create work notes content"
+printf 'claude-memory impress/memory code/shared-path\n' > "$WORK_NOTES/links.tsv"
+printf 'claude-memory impress/memory elsewhere/project\n' > "$WORK_NOTES/links.local.tsv"
+LOCAL_MEMORY="$TEST_HOME/.claude/projects/$(printf '%s' "$TEST_HOME/elsewhere/project" | sed 's/[^A-Za-z0-9]/-/g')/memory"
+mkdir -p "$(dirname "$LOCAL_MEMORY")" && ln -s "$WORK_NOTES/impress/memory" "$LOCAL_MEMORY" || fail "could not link local memory"
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+grep -Fq 'memory is linked to work notes (local override)' "$TEST_CASE_DIR/output" || fail "local override link was not recognized"
+grep -Fq 'shared-path' "$TEST_CASE_DIR/output" && fail "overridden shared entry was still checked"
 
 echo "doctor regression checks passed"

@@ -536,6 +536,21 @@ run_installer > "$TEST_CASE_DIR/second-output" 2>&1 || fail "second installer ru
 grep -Fq "$MEMORY_LINK already linked" "$TEST_CASE_DIR/second-output" || fail "work notes links were not idempotent"
 grep -Fq "Cloned work notes" "$TEST_CASE_DIR/second-output" && fail "existing work notes were cloned again"
 
+# links.local.tsv replaces shared entries with the same source on this machine only.
+setup_fixture work-notes-local-override
+create_work_notes_origin
+(umask 077; printf 'export WORK_NOTES_REPO="%s"\n' "$WORK_NOTES_ORIGIN" > "$TEST_DOTFILES/alias/.env") || fail "could not configure work notes"
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "installer failed before the local override"
+printf 'claude-memory impress/memory elsewhere/project\nhome bad/../path x\n' > "$TEST_HOME/work-notes/links.local.tsv"
+SHARED_MEMORY="$TEST_HOME/.claude/projects/$(printf '%s' "$TEST_HOME/code/sample-project" | sed 's/[^A-Za-z0-9]/-/g')/memory"
+LOCAL_MEMORY="$TEST_HOME/.claude/projects/$(printf '%s' "$TEST_HOME/elsewhere/project" | sed 's/[^A-Za-z0-9]/-/g')/memory"
+unlink "$SHARED_MEMORY" || fail "could not reset the shared memory link"
+run_installer > "$TEST_CASE_DIR/override-output" 2>&1 || fail "installer failed with a local override"
+assert_link_target "$LOCAL_MEMORY" "$TEST_HOME/work-notes/impress/memory"
+[ ! -e "$SHARED_MEMORY" ] && [ ! -L "$SHARED_MEMORY" ] || fail "overridden shared entry was still linked"
+assert_link_target "$TEST_HOME/notes/weekly" "$TEST_HOME/work-notes/impress/weekly"
+grep -Fq "Skipping links.local.tsv line 2: paths must be relative" "$TEST_CASE_DIR/override-output" || fail "invalid local entry was not reported"
+
 # An existing real memory directory is preserved with migration guidance.
 setup_fixture work-notes-existing-memory
 create_work_notes_origin

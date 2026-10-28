@@ -148,6 +148,7 @@ Repository-managed skills:
 | `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals and current checks, then close out ClickUp (Azure DevOps) and worktrees |
 | `squash-git-commits` | Squash feature-branch commits into one relative to the selected PR or repository target branch |
 | `summarize-pr` | Summarize branch changes and update the Azure DevOps PR description |
+| `sync-work-notes` | Pull the private work notes, update decisions, reports, and memory from the current session, then commit and push |
 
 To add a shared skill, create `~/dotfiles/skills/my-skill/SKILL.md` and run `./install.sh`. The installer creates all four per-skill links; no manual links are needed.
 
@@ -267,8 +268,13 @@ claude-memory   impress/memory    code/my-project
 - `home` links `$HOME/<target>` to `<source>` in the notes.
 - `claude-memory` links Claude Code's memory directory for the project at `$HOME/<target>` (`~/.claude/projects/<encoded path>/memory`) to `<source>`, so the assistant keeps its project memory on every machine. The project must be cloned at the same path relative to `$HOME`.
 - Sources are relative to the notes root and targets relative to `$HOME`; absolute paths and `..` are rejected.
+- A machine that keeps a project somewhere else adds `links.local.tsv` next to `links.tsv`, in the same format. Add it to the notes repository's `.gitignore`: it stays on that machine. A local entry replaces every shared entry with the same source, so the shared manifest keeps the common default path:
 
-Existing targets are never replaced. To move an existing Claude memory directory into the notes, copy its files into the source directory, remove the original directory, and run `./install.sh` again. `doctor` reports missing links, uncommitted notes, and commits that are not pushed yet.
+  ```text
+  claude-memory   impress/memory    code/my-project
+  ```
+
+Existing targets are never replaced. To move an existing Claude memory directory into the notes, copy its files into the source directory, remove the original directory, and run `./install.sh` again. `doctor` fetches the notes and reports missing links, uncommitted notes, commits that are not pushed yet, and commits from another machine that are not pulled yet. The `sync-work-notes` skill pulls, updates the notes from the current session, commits, and pushes; run it at the end of a work session.
 
 Keep secrets out of the notes exactly as in this repository: tokens stay in `alias/.env`, and remote URLs with credentials are never written down. The notes repository's own README describes what belongs in it.
 
@@ -314,7 +320,7 @@ All scripts are in `scripts/` and available on `$PATH` after installation.
 
 ### `doctor`
 
-Checks symlinks (including the starship config), shared skills, shell config, PATH, optional dependencies, Oh My Zsh plugin files, and the optional work notes (links from `links.tsv`, uncommitted changes, and unpushed or unpulled commits as of the last fetch; it never fetches the work notes).
+Checks symlinks (including the starship config), shared skills, shell config, PATH, optional dependencies, Oh My Zsh plugin files, and the optional work notes (links from `links.tsv` and `links.local.tsv`, uncommitted changes, and unpushed commits; it fetches the notes the same way as the repository below and warns when another machine pushed changes you have not pulled).
 Core setup failures produce a non-zero exit code; missing optional tools and
 configuration are reported as warnings.
 Shell checks recognize standalone `source`/`.` commands and `PATH` assignments

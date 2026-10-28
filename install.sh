@@ -466,9 +466,9 @@ if [ -d "$WORK_NOTES_PATH" ]; then
   if [ ! -f "$WORK_NOTES_PATH/links.tsv" ]; then
     echo "📒 $WORK_NOTES_PATH has no links.tsv; nothing to link."
   fi
-  while IFS=$'\t' read -r status source target _kind; do
+  while IFS=$'\t' read -r status source target _kind _manifest; do
     if [ "$status" != ok ]; then
-      echo "⚠️  Skipping links.tsv line $source: $target"
+      echo "⚠️  Skipping $source: $target"
     elif [ ! -e "$source" ]; then
       echo "⚠️  Work notes path $source does not exist; skipping its link."
     elif [ -d "$target" ] && [ ! -L "$target" ]; then
