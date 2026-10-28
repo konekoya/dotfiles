@@ -143,6 +143,7 @@ Repository-managed skills:
 | `implement-spec` | Implement a spec while maintaining `implementation-notes.html` |
 | `learn-quiz` | Teach a topic in stages and check understanding with quizzes |
 | `skill-creator` | Create, update, and evaluate shared agent skills (GitHub Copilot CLI, Codex, and Kiro CLI only) |
+| `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals and current checks, then close out ClickUp (Azure DevOps) and worktrees |
 | `squash-git-commits` | Squash feature-branch commits into one relative to the selected PR or repository target branch |
 | `summarize-pr` | Summarize branch changes and update the Azure DevOps PR description |
 
