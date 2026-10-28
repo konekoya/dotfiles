@@ -268,7 +268,7 @@ claude-memory   impress/memory    code/my-project
 - `home` links `$HOME/<target>` to `<source>` in the notes.
 - `claude-memory` links Claude Code's memory directory for the project at `$HOME/<target>` (`~/.claude/projects/<encoded path>/memory`) to `<source>`, so the assistant keeps its project memory on every machine. The project must be cloned at the same path relative to `$HOME`.
 - Sources are relative to the notes root and targets relative to `$HOME`; absolute paths and `..` are rejected.
-- A machine that keeps a project somewhere else adds `links.local.tsv` next to `links.tsv`, in the same format. Add it to the notes repository's `.gitignore`: it stays on that machine. A local entry replaces every shared entry with the same source, so the shared manifest keeps the common default path:
+- A machine that keeps a project somewhere else adds `links.local.tsv` next to `links.tsv`, in the same format. Keep it out of Git with the notes repository's `.gitignore`, and commit a commented `links.local.tsv.example` there so each machine can copy it. Remove the old link before switching paths, because `install.sh` never replaces an existing one. A local entry replaces every shared entry with the same source, so the shared manifest keeps the common default path:
 
   ```text
   claude-memory   impress/memory    code/my-project
