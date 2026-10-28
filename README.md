@@ -257,7 +257,9 @@ export WORK_NOTES_REPO="git@github.com:<you>/work-notes.git"   # SSH; never embe
 # export WORK_NOTES_DIR="$HOME/work-notes"                     # default
 ```
 
-`install.sh` clones the repository when `WORK_NOTES_DIR` does not exist, then reads `links.tsv` at its root. Each line has three whitespace-separated fields; `#` starts a comment:
+`install.sh` clones the repository when `WORK_NOTES_DIR` does not exist. If cloning fails, it asks you to verify `WORK_NOTES_REPO`, repository existence and access, Git authentication, and network connectivity before retrying. Git output stays hidden to avoid exposing the private repository URL.
+
+After cloning, it reads `links.tsv` at the repository root. Each line has three whitespace-separated fields; `#` starts a comment:
 
 ```text
 # kind          source            target
