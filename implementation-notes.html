@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Image Shrink Implementation Notes</title>
+<style>
+body { font: 16px/1.6 system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #ddd; padding: .6rem; text-align: left; vertical-align: top; }
+th { background: #f5f5f5; }
+code { background: #f5f5f5; padding: .1rem .25rem; }
+</style>
+<h1>Image Shrink Implementation Notes</h1>
+<p>Implemented <code>scripts/image-shrink</code>, a local Bash CLI for shrinking JPEG,
+PNG, WebP, and HEIC/HEIF still images to a measured size limit, with interactive use
+through <code>cmds</code>. Updated the README, Brewfile, doctor diagnostics, and CI dependencies.</p>
+<h2>Design Decisions</h2>
+<table>
+<tr><th>Area</th><th>Decision</th><th>Reason</th></tr>
+<tr><td>Defaults</td><td>500 KB; preserve format; create a sibling <code>.small</code> file.</td><td>Matches the reviewed design and preserves originals.</td></tr>
+<tr><td>Quality bounds</td><td>Search encoder quality 60–90 before reducing dimensions; stop at a 320-pixel longest edge, or the starting edge if smaller.</td><td>Predictable bounds instead of silently producing a tiny, heavily degraded image. An explicit smaller maximum edge is respected.</td></tr>
+<tr><td>Units</td><td>KB/MB are decimal; KiB/MiB are binary. Fractional sizes are rounded down to whole bytes.</td><td>Upload limits should be unambiguous and never exceeded.</td></tr>
+<tr><td>Output format</td><td>An explicit output extension selects the format; conflicting <code>--format</code> is an error.</td><td>File contents and extension must agree.</td></tr>
+<tr><td>Output publication</td><td>Use the system <code>link</code> utility to publish a completed, verified candidate atomically on the output filesystem.</td><td>Unlike <code>ln</code>, it treats the destination as an exact path, so a concurrent directory or symlink cannot redirect the output. Existing paths are never replaced.</td></tr>
+<tr><td>Interactive image picker</td><td>Prefer fzf with live search, arrow/Tab navigation, Enter to select/open, parent-directory navigation, and Esc cancellation. List supported images and directories, including hidden entries. Offer manual path entry and retain Readline when fzf is absent.</td><td>Improves selection without adding a language runtime or a new dependency to the Brewfile. Filenames are passed as data, never shell commands; user fzf default options are isolated so multi-selection or custom execute bindings cannot change the picker contract.</td></tr>
+</table>
+<h2>Deviations</h2>
+<p>None identified.</p>
+<h2>Tradeoffs</h2>
+<table>
+<tr><th>Area</th><th>Choice</th><th>Reason</th></tr>
+<tr><td>Backend</td><td>ImageMagick, with Homebrew's libheif dependency.</td><td>A single image-processing backend for all reviewed formats.</td></tr>
+<tr><td>Repeated attempts</td><td>Decode and orient once into a private, lossless MIFF working image; derive every attempt from it.</td><td>Avoid repeated HEIC decoding and cumulative lossy recompression.</td></tr>
+<tr><td>PNG</td><td>Lossless encoding at each resolution; resize if needed.</td><td>No silent palette reduction or format conversion.</td></tr>
+<tr><td>iPhone features</td><td>Primary still image only; no promise to retain Live Photo video, depth data, or HDR gain maps.</td><td>The tool prepares small standalone images, and the original is retained.</td></tr>
+</table>
+<h2>Open Questions</h2>
+<p>None blocking implementation. The quality and dimension floors are documented defaults that can be revised after use.</p>
+<h2>Validation</h2>
+<ul>
+<li>Installed ImageMagick and ShellCheck; verified HEIC reading and writing with the installed backend.</li>
+<li>All shell syntax checks, Zsh syntax checks, ShellCheck at warning severity, and whitespace checks passed.</li>
+<li>All eleven regression suites passed with macOS Bash before publishing the PR. Azure DevOps tests used <code>GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1</code> to isolate fixture profiles from machine-global Git configuration; the initial run with machine-global settings failed its HTTPS context assertion. No unrelated Azure DevOps code was changed.</li>
+<li>The new image suite uses generated images and a temporary home. It covers measured limits, quality-only compression, resizing bounds, PNG/WebP transparency, HEIC input/output and conversion, EXIF orientation, primary still selection, literal special-character paths, existing-path preservation, concurrent publication, encoder failure, interruption cleanup, and interactive discovery through <code>cmds</code>.</li>
+<li>Readline completion is exercised through pseudo-terminals with macOS Bash: unique prefixes, empty-prompt candidate listing, ambiguous prefixes, directory traversal, absolute paths, spaces, quotes, backslashes, and literal command-substitution characters. Tests cover direct CLI use and <code>cmds</code>, with an isolated input configuration.</li>
+<li>The fzf picker has a separate regression suite using real fzf in controlling pseudo-terminals. It covers live filtering, arrows, Tab/Shift-Tab, directory/parent navigation, selection through <code>cmds</code>, hidden images, unsupported-file filtering, manual paths, fallback without fzf, cancellation, picker failure, unusual filenames, and isolation from fzf default options. Terminal access was blocked inside the local sandbox; these fixture-only tests passed outside it. CI installs fzf for this coverage.</li>
+<li>A generated JPEG shrank from 1,849,513 bytes to 118,873 bytes for a 120 KB target. HEIC-to-JPEG/WebP conversion and transparent HEIC output also passed real-backend smoke checks.</li>
+<li>Installer and doctor were exercised through temporary fixtures; the real home configuration and credentials were not modified.</li>
+</ul>
+</html>

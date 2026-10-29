@@ -1,0 +1,307 @@
+#!/bin/bash
+# Description: Resize and compress JPEG, PNG, WebP, and HEIC images to a size limit
+
+set -euo pipefail
+export LC_ALL=C
+
+usage() {
+  cat <<'EOF'
+Usage: image-shrink IMAGE [options]
+       image-shrink                  Interactive prompts (also used by cmds)
+                                     Search/select images with fzf when installed
+
+  --max-size SIZE       Maximum output size (default: 500KB)
+                       Units: B, KB, MB, KiB, MiB; e.g. 0.5MB or 512KiB
+  --max-side PIXELS     Limit the longest edge; keep proportions, never enlarge
+  --keep-dimensions    Compress without reducing pixel dimensions
+  --format FORMAT      jpg, png, webp, heic, heif (default: input format)
+  -o, --output FILE    Output path; its extension also selects the output format
+  -h, --help           Show this help
+
+Originals and existing output paths are never overwritten. Default output:
+IMAGE.small.EXT. Images already under the limit are skipped unless a resize,
+format, or output path is explicitly requested. All processing stays local.
+
+Lossy quality is searched from 90 down to 60, then dimensions are reduced.
+Automatic resizing stops at a 320-pixel longest edge (or the starting edge
+if smaller). PNG remains lossless at each resolution. Impossible limits fail
+without publishing an oversized file. HEIC processes the primary still image.
+EOF
+}
+
+die() { printf 'image-shrink: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+format_for_extension() {
+  local extension
+  extension="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$extension" in
+    jpg|jpeg) printf 'jpeg' ;;
+    png|webp) printf '%s' "$extension" ;;
+    heic|heif) printf 'heic' ;;
+    *) return 1 ;;
+  esac
+}
+
+size_bytes() {
+  awk -v value="$1" 'BEGIN {
+    value = toupper(value)
+    if (value !~ /^[0-9]+([.][0-9]+)?(B|KB|MB|KIB|MIB)$/) exit 1
+    number = value + 0
+    sub(/^[0-9]+([.][0-9]+)?/, "", value)
+    scale = 1
+    if (value == "KB") scale = 1000
+    if (value == "MB") scale = 1000000
+    if (value == "KIB") scale = 1024
+    if (value == "MIB") scale = 1048576
+    bytes = int(number * scale)
+    if (bytes < 1 || bytes > 1000000000000) exit 1
+    printf "%.0f", bytes
+  }'
+}
+
+file_bytes() { wc -c < "$1" | tr -d '[:space:]'; }
+
+read_image_path() {
+  set -o emacs
+  bind 'set show-all-if-ambiguous on'
+  bind '"\C-i": complete'
+  # shellcheck disable=SC2162 # Decode Readline filename escapes and its appended space without evaluating shell syntax.
+  read -e -p 'Image path (Tab to complete/list files): ' input || exit 130
+}
+
+select_image() {
+  local directory="$PWD" path name choice picker_status
+  local entries=()
+  while true; do
+    entries=()
+    # Include hidden entries without changing the caller's glob settings.
+    for path in "$directory"/* "$directory"/.[!.]* "$directory"/..?*; do
+      name="${path##*/}"
+      if [ -d "$path" ]; then
+        entries+=("$name/")
+      elif [ -f "$path" ] && [ -r "$path" ]; then
+        case "${name##*.}" in
+          [jJ][pP][gG]|[jJ][pP][eE][gG]|[pP][nN][gG]|[wW][eE][bB][pP]|[hH][eE][iI][cC]|[hH][eE][iI][fF]) entries+=("$name") ;;
+        esac
+      fi
+    done
+    [ "$directory" = / ] || entries+=("../")
+    entries+=("[Enter a path]")
+    if choice="$(
+      # Isolate selection behavior from user multi-select/preview/execute options.
+      # NUL input keeps unusual filenames intact; a trailing sentinel preserves
+      # trailing newlines in the selected name through command substitution.
+      printf '%s\0' "${entries[@]}" | FZF_DEFAULT_OPTS='' FZF_DEFAULT_OPTS_FILE='' \
+        fzf --read0 --sync --no-multi --height=60% --layout=reverse --border \
+          --prompt='Image > ' --header="$directory"$'\nSelect an image: type to search | arrows/Tab: move | Enter: open | Esc: cancel' \
+          --bind='tab:down,shift-tab:up'
+      picker_status=$?
+      printf '\001'
+      exit "$picker_status"
+    )"; then
+      choice="${choice%$'\001'}"
+      choice="${choice%$'\n'}"
+    else
+      picker_status=$?
+      case "$picker_status" in
+        1|130) printf 'Cancelled.\n' >&2; return 130 ;;
+        *) die 'The image picker failed. Pass an image path as an argument to bypass it.' ;;
+      esac
+    fi
+    if [ "$choice" = '[Enter a path]' ]; then
+      read_image_path
+      return
+    elif [ -d "$directory/$choice" ]; then
+      directory="$(cd "$directory/$choice" && pwd -P)" || die 'Could not open the selected directory.'
+    else
+      input="$directory/$choice"
+      return
+    fi
+  done
+}
+
+input="" output="" max_size=500KB max_side="" requested_format=""
+keep_dimensions=false
+if [ "$#" -eq 0 ]; then
+  [ -t 0 ] || { usage >&2; exit 2; }
+  if command -v fzf >/dev/null 2>&1; then select_image; else read_image_path; fi
+  printf 'Selected image: %s\n' "$input"
+  IFS= read -r -p 'Maximum size [500KB]: ' max_size || exit 130
+  max_size="${max_size:-500KB}"
+  IFS= read -r -p 'Maximum longest edge [auto]: ' max_side || exit 130
+  IFS= read -r -p 'Output format [same; jpg/png/webp/heic]: ' requested_format || exit 130
+fi
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --max-size|--max-side|--format|-o|--output)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || die "Missing value for $1." 2
+      case "$1" in
+        --max-size) max_size="$2" ;;
+        --max-side) max_side="$2" ;;
+        --format) requested_format="$2" ;;
+        -o|--output) output="$2" ;;
+      esac
+      shift 2
+      ;;
+    --keep-dimensions) keep_dimensions=true; shift ;;
+    --)
+      shift
+      [ "$#" -eq 1 ] && [ -z "$input" ] || die 'Expected one image path after --.' 2
+      input="$1"; shift
+      ;;
+    -*) die "Unknown option: $1. Use --help." 2 ;;
+    *)
+      [ -z "$input" ] || die 'Only one input image is supported.' 2
+      input="$1"; shift
+      ;;
+  esac
+done
+
+[ -n "$input" ] || die 'An input image is required. Use --help.' 2
+target_bytes="$(size_bytes "$max_size")" || die 'Invalid size. Use e.g. 500KB, 0.5MB, or 512KiB (1 B to 1 TB).' 2
+if [ -n "$max_side" ]; then
+  [[ "$max_side" =~ ^[0-9]{1,6}$ ]] || die '--max-side must be an integer from 1 to 100000.' 2
+  max_side=$((10#$max_side))
+  [ "$max_side" -ge 1 ] && [ "$max_side" -le 100000 ] || die '--max-side must be from 1 to 100000.' 2
+  [ "$keep_dimensions" = false ] || die '--max-side cannot be combined with --keep-dimensions.' 2
+fi
+
+# Use explicit decoders and stdin: paths containing ImageMagick syntax such as
+# brackets, colons, or percent signs must be treated as literal filesystem paths.
+case "$input" in /*) ;; *) input="$PWD/$input" ;; esac
+[ -f "$input" ] && [ -r "$input" ] || die 'Input must be a readable regular image file.'
+input_name="${input##*/}"
+input_format="$(format_for_extension "${input_name##*.}")" || die 'Supported input extensions: jpg, jpeg, png, webp, heic, heif.' 2
+output_format="$input_format"
+if [ -n "$requested_format" ]; then
+  output_format="$(format_for_extension "$requested_format")" || die 'Unsupported output format. Use jpg, png, webp, heic, or heif.' 2
+fi
+explicit_output=false
+if [ -n "$output" ]; then
+  explicit_output=true
+  case "$output" in /*) ;; *) output="$PWD/$output" ;; esac
+  output_name="${output##*/}"
+  extension_format="$(format_for_extension "${output_name##*.}")" || die 'Output needs a supported image extension.' 2
+  if [ -n "$requested_format" ] && [ "$extension_format" != "$output_format" ]; then
+    die 'Output extension conflicts with --format.' 2
+  fi
+  output_format="$extension_format"
+else
+  extension="$output_format"
+  [ "$extension" != jpeg ] || extension=jpg
+  output="${input%.*}.small.$extension"
+fi
+[ ! -e "$output" ] && [ ! -L "$output" ] || die 'Output path already exists; choose another path with -o.'
+output_dir="${output%/*}"
+[ -d "$output_dir" ] || die 'Output directory does not exist.'
+
+command -v magick >/dev/null 2>&1 || die 'ImageMagick is required. Install it with: brew install imagemagick'
+formats="$(magick -list format 2>/dev/null)" || die 'Could not query ImageMagick format support.'
+supports_format() {
+  local coder
+  coder="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
+  printf '%s\n' "$formats" | awk -v coder="$coder" -v mode="$2" '
+    { name = $1; sub(/[*]$/, "", name) }
+    name == coder && $3 ~ mode { found = 1 }
+    END { exit !found }'
+}
+supports_format "$input_format" r || die 'Input codec unavailable. Install/reinstall ImageMagick; HEIC requires libheif.'
+supports_format "$output_format" w || die 'Output codec unavailable. Install/reinstall ImageMagick; HEIC requires libheif.'
+
+work_dir="$(mktemp -d "$output_dir/.image-shrink.XXXXXX")" || die 'Could not create a private working directory beside the output.'
+trap 'rm -rf "$work_dir"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+source_image="$work_dir/source.miff"
+magick -quiet "$input_format:-[0]" -auto-orient "$source_image" < "$input" >/dev/null 2>&1 || die 'Could not decode the input image (it may be damaged or its codec unavailable).'
+info="$(magick identify -format '%w %h %[opaque]' "$source_image" 2>/dev/null)" || die 'Could not inspect the decoded image.'
+read -r original_width original_height opaque <<< "$info"
+[[ "$original_width" =~ ^[0-9]+$ && "$original_height" =~ ^[0-9]+$ ]] || die 'Invalid image dimensions.'
+if [ "$output_format" = jpeg ] && [ "$opaque" != True ]; then
+  die 'JPEG cannot preserve transparency. Choose PNG or WebP instead.'
+fi
+original_bytes="$(file_bytes "$input")"
+if [ "$original_bytes" -le "$target_bytes" ] && [ -z "$max_side" ] &&
+   [ -z "$requested_format" ] && [ "$explicit_output" = false ]; then
+  printf 'Skipped: already under the limit (%s bytes <= %s bytes).\n' "$original_bytes" "$target_bytes"
+  exit 0
+fi
+
+side="$original_width"
+[ "$original_height" -le "$side" ] || side="$original_height"
+if [ -n "$max_side" ] && [ "$max_side" -lt "$side" ]; then side="$max_side"; fi
+minimum_side=320
+[ "$side" -ge "$minimum_side" ] || minimum_side="$side"
+candidate="$work_dir/candidate"
+best="$work_dir/best"
+candidate_bytes=0
+encode() {
+  local quality="$1"
+  local options=()
+  if [ "$output_format" = png ]; then
+    options=(-define png:compression-level=9)
+  else
+    options=(-quality "$quality")
+  fi
+  magick -quiet "$source_image" -resize "${side}x${side}>" "${options[@]}" \
+    "$output_format:$candidate" >/dev/null 2>&1 || die 'Image encoding failed; no output was published.'
+  candidate_bytes="$(file_bytes "$candidate")"
+  [ "$candidate_bytes" -gt 0 ] || die 'Encoder produced an empty file.'
+}
+
+printf 'Shrinking to <= %s bytes (%s)...\n' "$target_bytes" "$output_format"
+while true; do
+  encode 90
+  if [ "$candidate_bytes" -le "$target_bytes" ]; then
+    mv "$candidate" "$best"
+    break
+  fi
+  if [ "$output_format" != png ]; then
+    encode 60
+    if [ "$candidate_bytes" -le "$target_bytes" ]; then
+      mv "$candidate" "$best"
+      low=61 high=89
+      # Only publish measured candidates. Codec sizes need not be perfectly
+      # monotonic; binary search is a practical bounded quality search.
+      while [ "$low" -le "$high" ]; do
+        quality=$(((low + high) / 2))
+        encode "$quality"
+        if [ "$candidate_bytes" -le "$target_bytes" ]; then
+          mv "$candidate" "$best"
+          low=$((quality + 1))
+        else
+          high=$((quality - 1))
+        fi
+      done
+      break
+    fi
+  fi
+  if [ "$keep_dimensions" = true ] || [ "$side" -le "$minimum_side" ]; then
+    die "Cannot meet $max_size within the quality/dimension bounds (last attempt: $candidate_bytes bytes). Try WebP, a larger limit, or an explicit smaller --max-side."
+  fi
+  side="$(awk -v side="$side" -v target="$target_bytes" -v bytes="$candidate_bytes" -v floor="$minimum_side" 'BEGIN {
+    scale = 0.9 * sqrt(target / bytes)
+    if (scale < 0.5) scale = 0.5
+    if (scale > 0.85) scale = 0.85
+    next_side = int(side * scale)
+    if (next_side < floor) next_side = floor
+    printf "%d", next_side
+  }')"
+done
+
+final_bytes="$(file_bytes "$best")"
+[ "$final_bytes" -le "$target_bytes" ] || die 'Output verification failed.'
+dimensions="$(magick identify -format '%wx%h' "$output_format:$best" 2>/dev/null)" || die 'Could not verify the encoded image.'
+# link(1) publishes the exact destination atomically without replacing files,
+# symlinks, or directories. The working directory is on the output filesystem.
+link "$best" "$output" 2>/dev/null || die 'Could not publish output; the path may already exist or the filesystem may not support hard links.'
+printf '%s -> %s\n' "$input" "$output"
+awk -v before="$original_bytes" -v after="$final_bytes" 'BEGIN {
+  change = 100*(1-after/before)
+  label = "smaller"
+  if (change < 0) { change = -change; label = "larger" }
+  printf "%.2f MB -> %.1f KB (%d -> %d bytes; %.1f%% %s)\n", before/1000000, after/1000, before, after, change, label
+}'
+printf '%sx%s -> %s\n' "$original_width" "$original_height" "$dimensions"

@@ -376,7 +376,7 @@ done
 section "Dependencies"
 
 starship_installed=false
-for cmd in delta fzf jq curl python3 docker az gh starship; do
+for cmd in delta fzf jq curl python3 docker az gh starship magick; do
   case "$cmd" in
     delta)  pkg="git-delta"; note="configured Git pager is unavailable" ;;
     fzf)    pkg="fzf";        note="fuzzy selection unavailable; Bash fallbacks remain available" ;;
@@ -387,6 +387,7 @@ for cmd in delta fzf jq curl python3 docker az gh starship; do
     az)     pkg="azure-cli";  note="Azure DevOps profiles using auth=azure-cli are unavailable; PAT profiles remain supported" ;;
     gh)     pkg="gh";         note="GitHub CLI auth fallback unavailable; GITHUB_TOKEN remains supported" ;;
     starship) pkg="starship"; note="shared prompt unavailable; zsh falls back to the oh-my-zsh theme (needs a Nerd Font)" ;;
+    magick) pkg="imagemagick"; note="image-shrink is unavailable" ;;
   esac
 
   if command -v "$cmd" >/dev/null 2>&1; then
@@ -396,6 +397,17 @@ for cmd in delta fzf jq curl python3 docker az gh starship; do
     check_warn "$cmd not found — $note (brew install $pkg)"
   fi
 done
+
+if command -v magick >/dev/null 2>&1; then
+  if magick -list format 2>/dev/null | awk '
+    { name = $1; sub(/[*]$/, "", name) }
+    name == "HEIC" && $3 ~ /r/ && $3 ~ /w/ { found = 1 }
+    END { exit !found }'; then
+    check_pass "ImageMagick HEIC reading and writing are available"
+  else
+    check_warn "ImageMagick HEIC support is unavailable — reinstall imagemagick with libheif for iPhone photos"
+  fi
+fi
 
 # File names identify the Hack Nerd Font package without reading font contents.
 # This does not prove that macOS or the active terminal has loaded the font.

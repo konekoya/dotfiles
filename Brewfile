@@ -5,6 +5,7 @@ brew "jq"
 brew "azure-cli"
 brew "gh"
 brew "shellcheck"
+brew "imagemagick" # image-shrink; includes libheif for HEIC/HEIF support
 brew "python"
 brew "starship"
 brew "gawk"
