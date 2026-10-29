@@ -18,6 +18,7 @@ source "$DOTFILES_DIR/lib/shell-config.sh" || exit 1
 source "$DOTFILES_DIR/lib/agent-policy.sh" || exit 1
 source "$DOTFILES_DIR/lib/local-env.sh" || exit 1
 source "$DOTFILES_DIR/lib/work-notes.sh" || exit 1
+source "$DOTFILES_DIR/lib/morning.sh" || exit 1
 
 install_deps=false
 for arg in "$@"; do
@@ -483,6 +484,20 @@ if [ -d "$WORK_NOTES_PATH" ]; then
   done < <(work_notes_entries "$WORK_NOTES_PATH")
 elif [ -e "$WORK_NOTES_PATH" ]; then
   echo "⚠️  $WORK_NOTES_PATH is not a directory; preserving it and skipping work notes links."
+fi
+
+# morning: repositories to sync at the start of the day, from MORNING_REPOS in alias/.env.
+local_env_load MORNING_REPOS
+morning_configured=false
+while IFS= read -r morning_path; do
+  morning_configured=true
+  morning_problem="$(morning_repo_problem "$morning_path")"
+  if [ -n "$morning_problem" ]; then
+    echo "⚠️  morning repository $morning_path $morning_problem; fix MORNING_REPOS in alias/.env."
+  fi
+done < <(morning_repo_paths)
+if [ "$morning_configured" = false ]; then
+  echo "⚠️  morning has no repositories to sync; set MORNING_REPOS in alias/.env (colon-separated paths)."
 fi
 
 ZSHRC="$HOME/.zshrc"

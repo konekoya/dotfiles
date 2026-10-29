@@ -36,7 +36,7 @@ setup_fixture() {
   mkdir -p "$TEST_DOTFILES/agents" || fail "could not create policy directory"
   cp "$REPO_ROOT/agents/security.md" "$TEST_DOTFILES/agents/" || fail "could not copy policy"
   cp "$REPO_ROOT/lib/shell-config.sh" "$TEST_DOTFILES/lib/" || fail "could not copy shell helpers for $name"
-  cp "$REPO_ROOT/lib/local-env.sh" "$REPO_ROOT/lib/work-notes.sh" "$TEST_DOTFILES/lib/" || fail "could not copy work notes helpers for $name"
+  cp "$REPO_ROOT/lib/local-env.sh" "$REPO_ROOT/lib/work-notes.sh" "$REPO_ROOT/lib/morning.sh" "$TEST_DOTFILES/lib/" || fail "could not copy work notes helpers for $name"
   cp "$REPO_ROOT/git/.gitconfig" "$TEST_DOTFILES/git/.gitconfig" || fail "could not copy git config for $name"
   cp "$REPO_ROOT/git/.gitignore_global" "$TEST_DOTFILES/git/.gitignore_global" || fail "could not copy gitignore for $name"
   printf '# sample skill\n' > "$TEST_SKILL/SKILL.md"
@@ -416,6 +416,7 @@ run_doctor \
   CLICKUP_API_TOKEN=environment-clickup-secret \
   WORK_NOTES_REPO=environment-notes-secret \
   WORK_NOTES_DIR="$TEST_HOME/work-notes" \
+  MORNING_REPOS="$TEST_HOME/code/sample-project" \
   > "$TEST_CASE_DIR/output" 2>&1
 status=$?
 [ "$status" -eq 0 ] || fail "environment configuration returned status $status"
@@ -604,5 +605,19 @@ mkdir -p "$(dirname "$LOCAL_MEMORY")" && ln -s "$WORK_NOTES/impress/memory" "$LO
 run_doctor > "$TEST_CASE_DIR/output" 2>&1
 grep -Fq 'memory is linked to work notes (local override)' "$TEST_CASE_DIR/output" || fail "local override link was not recognized"
 grep -Fq 'shared-path' "$TEST_CASE_DIR/output" && fail "overridden shared entry was still checked"
+
+# morning: unset, missing, non-Git and ready repositories are each reported.
+setup_fixture morning-repos
+run_doctor > "$TEST_CASE_DIR/output" 2>&1 || fail "doctor failed without MORNING_REPOS"
+grep -Fq 'WARN: morning has no repositories to sync; set MORNING_REPOS' "$TEST_CASE_DIR/output" || fail "unset MORNING_REPOS was not reported"
+mkdir -p "$TEST_HOME/code/plain" || fail "could not create plain directory"
+git init -q "$TEST_HOME/code/ready" && git -C "$TEST_HOME/code/ready" remote add origin "$TEST_CASE_DIR/ready-origin.git" || fail "could not create ready repository"
+git init -q "$TEST_HOME/code/no-origin" || fail "could not create repository without origin"
+run_doctor MORNING_REPOS="~/code/ready:$TEST_HOME/code/missing:~/code/plain:~/code/no-origin" > "$TEST_CASE_DIR/output" 2>&1 || fail "doctor failed with MORNING_REPOS"
+grep -Fq 'PASS: morning repository ~/code/ready is ready' "$TEST_CASE_DIR/output" || fail "ready morning repository was not accepted"
+grep -Fq 'WARN: morning repository ~/code/missing does not exist' "$TEST_CASE_DIR/output" || fail "missing morning repository was not reported"
+grep -Fq 'WARN: morning repository ~/code/plain is not a Git repository' "$TEST_CASE_DIR/output" || fail "non-Git morning repository was not reported"
+grep -Fq "WARN: morning repository ~/code/no-origin has no 'origin' remote" "$TEST_CASE_DIR/output" || fail "morning repository without origin was not reported"
+grep -Fq 'morning has no repositories' "$TEST_CASE_DIR/output" && fail "configured MORNING_REPOS was reported as unset"
 
 echo "doctor regression checks passed"
