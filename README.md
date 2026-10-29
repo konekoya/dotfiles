@@ -519,6 +519,27 @@ sync-branch --dry-run --force  # preview force-mode actions
 
 After the summary, it prints the resulting branch list (local branches with their upstream and ahead/behind state, then remote-tracking branches), so a separate `git branch -a` is not needed. Under `--dry-run` the list shows the unchanged current state. Output is colored only when writing to a terminal; set `NO_COLOR=1` to disable it.
 
+### `morning`
+
+Start-of-day sync for the repositories you work in. List them in `alias/.env`:
+
+```sh
+export MORNING_REPOS="$HOME/code/project-a:$HOME/code/project-b"   # colon-separated; "~" works
+```
+
+The work notes checkout is added automatically when present. For each repository, `morning`:
+
+1. Fetches `origin` and fast-forwards the default branch when it is checked out with no local changes and no local-only commits. A repository on another branch, with uncommitted changes, or with unpushed commits is reported and left alone.
+2. If `orca` is installed, lists Orca worktrees whose upstream branch is gone. One whose changes are already on the default branch (same proof as `sync-branch`), with no uncommitted changes and no open Orca terminal, is shown with the `orca worktree rm` command that removes it; others are flagged for a manual check. `morning` never removes worktrees.
+3. Runs `sync-branch` to delete local branches proven merged. Branches still held by a worktree are kept, so run `morning` again after removing worktrees.
+
+```sh
+morning              # sync, review worktrees, clean merged branches
+morning --dry-run    # fetch only; report what would change
+```
+
+Missing configuration and unusable paths are warnings: `morning`, `install.sh`, and `doctor` each report an unset `MORNING_REPOS` and any listed path that is missing, not a Git repository, or has no `origin` remote.
+
 ### `track-branch`
 
 Fetches `origin` and prunes stale refs, then creates or configures a local tracking branch for an existing remote branch. It does not check out or switch branches. With no argument, it offers interactive selection using `fzf` or a numbered Bash menu; `main`, `master`, and `develop` are hidden. A branch already checked out in any worktree cannot be prepared for reuse.

@@ -54,7 +54,7 @@ Standalone Bash utilities, primarily for macOS. Keep scripts small and executabl
 
 ### `lib/`
 
-Small shared Bash helpers used by scripts, including `local-env.sh`, the on-demand loader for `alias/.env`. Keep command-specific behavior in `scripts/` and avoid turning `lib/` into a general framework.
+Small shared Bash helpers used by scripts, including `local-env.sh`, the on-demand loader for `alias/.env`, and `morning.sh`, which parses `MORNING_REPOS` for `morning`, `install.sh`, and `doctor`. Keep command-specific behavior in `scripts/` and avoid turning `lib/` into a general framework.
 
 `azure-devops.sh` resolves a selected fetch/push remote pair and binds Azure DevOps
 requests to a per-repository profile. `http.sh` passes authorization headers through

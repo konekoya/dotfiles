@@ -30,7 +30,7 @@ setup_fixture() {
   mkdir -p "$TEST_DOTFILES/agents" || fail "could not create policy directory"
   cp "$REPO_ROOT/agents/security.md" "$TEST_DOTFILES/agents/" || fail "could not copy policy"
   cp "$REPO_ROOT/lib/shell-config.sh" "$TEST_DOTFILES/lib/" || fail "could not copy shell helpers"
-  cp "$REPO_ROOT/lib/local-env.sh" "$REPO_ROOT/lib/work-notes.sh" "$TEST_DOTFILES/lib/" || fail "could not copy work notes helpers"
+  cp "$REPO_ROOT/lib/local-env.sh" "$REPO_ROOT/lib/work-notes.sh" "$REPO_ROOT/lib/morning.sh" "$TEST_DOTFILES/lib/" || fail "could not copy work notes helpers"
   cp "$REPO_ROOT/scripts/doctor" "$TEST_DOTFILES/scripts/doctor" || fail "could not copy doctor for $name"
   cp "$REPO_ROOT/install.sh" "$TEST_DOTFILES/install.sh" || fail "could not copy installer for $name"
   cp "$REPO_ROOT/git/.gitconfig" "$TEST_DOTFILES/git/.gitconfig" || fail "could not copy Git config for $name"
@@ -573,5 +573,13 @@ run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "installer failed when the 
 grep -Fq "Could not clone work notes" "$TEST_CASE_DIR/output" || fail "work notes clone failure was not reported"
 grep -Fq "private-token-placeholder-repo" "$TEST_CASE_DIR/output" && fail "work notes repository URL was printed"
 [ ! -e "$TEST_HOME/work-notes" ] || fail "failed clone left a work notes directory"
+
+# morning: the installer warns about missing configuration and unusable repositories.
+setup_fixture morning-repos
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "installer failed without MORNING_REPOS"
+grep -Fq "morning has no repositories to sync; set MORNING_REPOS" "$TEST_CASE_DIR/output" || fail "unset MORNING_REPOS was not reported"
+printf 'export MORNING_REPOS="%s"\n' "$TEST_HOME/code/missing" > "$TEST_DOTFILES/alias/.env" || fail "could not configure MORNING_REPOS"
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "installer failed with a missing morning repository"
+grep -Fq "morning repository $TEST_HOME/code/missing does not exist" "$TEST_CASE_DIR/output" || fail "missing morning repository was not reported"
 
 echo "install regression checks passed"

@@ -1,0 +1,276 @@
+#!/bin/bash
+# Description: Start-of-day sync: fast-forward configured repositories, review Orca worktrees, clean merged branches
+
+usage() {
+  cat <<'EOF'
+Usage: morning [--dry-run] [--help]
+
+Start-of-day sync for the repositories listed in MORNING_REPOS (alias/.env,
+colon-separated paths). The work notes checkout is included when present.
+
+  1. Fetch each repository and fast-forward its default branch when that branch
+     is checked out with no local changes. Anything else is reported, not changed.
+  2. List Orca worktrees whose upstream is gone and whose changes are already on
+     the default branch. Worktrees are never removed; the output gives the
+     command for the ones that are safe to remove.
+  3. Run sync-branch in each repository to delete local branches proven merged.
+
+--dry-run fetches but changes nothing (sync-branch runs with --dry-run too).
+EOF
+}
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || exit 1
+DOTFILES_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)" || exit 1
+source "$DOTFILES_DIR/lib/shell-config.sh" || exit 1
+source "$DOTFILES_DIR/lib/local-env.sh" || exit 1
+source "$DOTFILES_DIR/lib/work-notes.sh" || exit 1
+source "$DOTFILES_DIR/lib/morning.sh" || exit 1
+
+dry_run=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry_run=true ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "❌ Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+if ! command -v git >/dev/null 2>&1; then
+  echo "❌ git not found." >&2
+  exit 1
+fi
+
+warn_count=0
+
+section() {
+  printf '\n── %s ──\n' "$1"
+}
+
+info() {
+  printf '  %s\n' "$1"
+}
+
+warn() {
+  printf '  ⚠️  %s\n' "$1"
+  warn_count=$((warn_count + 1))
+}
+
+ref() {
+  shell_config_ref "$1" tilde
+}
+
+fetch_quietly() {
+  # Never prompt, and give up quickly offline.
+  GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5" \
+    git -C "$1" -c http.lowSpeedLimit=1 -c http.lowSpeedTime=5 fetch --prune --quiet origin >/dev/null 2>&1
+}
+
+default_branch() {
+  local dir="$1" head candidate
+
+  head="$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"
+  if [ -n "$head" ]; then
+    printf '%s' "${head#origin/}"
+    return 0
+  fi
+  for candidate in main master develop; do
+    if git -C "$dir" rev-parse --verify --quiet "refs/remotes/origin/$candidate" >/dev/null; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Same proof as sync-branch: merged when the branch is an ancestor of the base, or when
+# merging it into the base changes nothing (squash or rebase merge).
+changes_on_base() {
+  local dir="$1" branch="$2" base="$3" base_tree merged_tree
+
+  git -C "$dir" merge-base --is-ancestor "refs/heads/$branch" "$base" 2>/dev/null && return 0
+  base_tree="$(git -C "$dir" rev-parse --verify --quiet "$base^{tree}")" || return 1
+  merged_tree="$(git -C "$dir" merge-tree --write-tree "$base" "refs/heads/$branch" 2>/dev/null)" || return 1
+  [ "${merged_tree%%$'\n'*}" = "$base_tree" ]
+}
+
+local_env_load MORNING_REPOS WORK_NOTES_DIR
+
+repos=()
+resolved_repos=()
+add_repo() {
+  local path="$1" resolved existing
+
+  resolved="$(cd -P "$path" 2>/dev/null && pwd -P)" || resolved="$path"
+  for existing in "${resolved_repos[@]}"; do
+    [ "$existing" = "$resolved" ] && return 0
+  done
+  repos+=("$path")
+  resolved_repos+=("$resolved")
+}
+
+while IFS= read -r repo_path; do
+  add_repo "$repo_path"
+done < <(morning_repo_paths)
+configured_count="${#repos[@]}"
+
+notes_path="$(work_notes_dir)"
+if git -C "$notes_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  add_repo "$notes_path"
+fi
+
+if [ "$dry_run" = true ]; then
+  echo "🌅 morning (dry run: nothing is changed)"
+else
+  echo "🌅 morning"
+fi
+
+# --- Repositories ---
+section "Repositories"
+
+if [ "$configured_count" -eq 0 ]; then
+  warn "No repositories configured; set MORNING_REPOS in alias/.env (colon-separated paths)"
+fi
+
+valid_repos=()
+for repo in "${repos[@]}"; do
+  repo_ref="$(ref "$repo")"
+  problem="$(morning_repo_problem "$repo")"
+  if [ -n "$problem" ]; then
+    warn "$repo_ref $problem; skipped"
+    continue
+  fi
+  valid_repos+=("$repo")
+
+  if ! fetch_quietly "$repo"; then
+    warn "$repo_ref: could not fetch origin; using the last fetched state"
+  fi
+
+  if ! base="$(default_branch "$repo")"; then
+    warn "$repo_ref: could not determine the default branch; not updated"
+    continue
+  fi
+  current="$(git -C "$repo" branch --show-current)"
+  changes="$(git -C "$repo" status --porcelain 2>/dev/null | grep -c .)"
+
+  if [ "$current" != "$base" ]; then
+    info "$repo_ref: on ${current:-a detached HEAD}, not $base; not updated"
+    continue
+  fi
+  if [ "$changes" -gt 0 ]; then
+    warn "$repo_ref: $changes uncommitted change(s) on $base; not updated"
+    continue
+  fi
+
+  ahead="$(git -C "$repo" rev-list --count "origin/$base..HEAD" 2>/dev/null)" || ahead=0
+  behind="$(git -C "$repo" rev-list --count "HEAD..origin/$base" 2>/dev/null)" || behind=0
+  if [ "$ahead" -gt 0 ]; then
+    warn "$repo_ref: $ahead local commit(s) on $base not on origin; not updated"
+  elif [ "$behind" -eq 0 ]; then
+    info "$repo_ref: $base is up to date"
+  elif [ "$dry_run" = true ]; then
+    info "$repo_ref: would fast-forward $base by $behind commit(s)"
+  elif git -C "$repo" merge --ff-only --quiet "origin/$base" >/dev/null 2>&1; then
+    info "$repo_ref: fast-forwarded $base by $behind commit(s)"
+  else
+    warn "$repo_ref: could not fast-forward $base"
+  fi
+done
+
+# --- Orca worktrees ---
+section "Orca worktrees"
+
+if ! command -v orca >/dev/null 2>&1; then
+  info "orca not found; skipped"
+elif ! command -v jq >/dev/null 2>&1; then
+  warn "jq not found; cannot read Orca worktrees"
+elif ! worktrees_json="$(orca worktree list --json 2>/dev/null)" ||
+  ! jq -e '.result.worktrees' >/dev/null 2>&1 <<<"$worktrees_json"; then
+  warn "Could not list Orca worktrees"
+else
+  terminals_json="$(orca terminal list --json 2>/dev/null)" || terminals_json='{}'
+  active_count=0
+  ready_count=0
+  fetched_dirs=()
+
+  while IFS= read -r wt_path; do
+    wt_ref="$(ref "$wt_path")"
+    if [ ! -d "$wt_path" ]; then
+      warn "$wt_ref is listed by Orca but missing on disk"
+      continue
+    fi
+
+    common_dir="$(cd "$wt_path" && cd -P "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)" || common_dir="$wt_path"
+    already_fetched=false
+    for dir in "${fetched_dirs[@]}"; do
+      [ "$dir" = "$common_dir" ] && already_fetched=true
+    done
+    if [ "$already_fetched" = false ]; then
+      fetch_quietly "$wt_path" || warn "$wt_ref: could not fetch origin; using the last fetched state"
+      fetched_dirs+=("$common_dir")
+    fi
+
+    branch="$(git -C "$wt_path" branch --show-current)"
+    track=""
+    [ -n "$branch" ] && track="$(git -C "$wt_path" for-each-ref --format='%(upstream:track)' "refs/heads/$branch")"
+    if [ "$track" != "[gone]" ]; then
+      active_count=$((active_count + 1))
+      continue
+    fi
+
+    if ! base="$(default_branch "$wt_path")"; then
+      warn "$wt_ref ($branch): upstream gone; could not determine the default branch"
+      continue
+    fi
+
+    reasons=()
+    changes="$(git -C "$wt_path" status --porcelain 2>/dev/null | grep -c .)"
+    [ "$changes" -gt 0 ] && reasons+=("$changes uncommitted change(s)")
+    terminal_count="$(jq --arg path "$wt_path" '[.result.terminals[]? | select(.worktreePath == $path)] | length' <<<"$terminals_json" 2>/dev/null)" || terminal_count=0
+    [ "${terminal_count:-0}" -gt 0 ] && reasons+=("$terminal_count open terminal(s)")
+
+    if ! changes_on_base "$wt_path" "$branch" "origin/$base"; then
+      warn "$wt_ref ($branch): upstream gone but its changes are not on $base; check it"
+    elif [ "${#reasons[@]}" -gt 0 ]; then
+      reason_text="$(printf '%s, ' "${reasons[@]}")"
+      warn "$wt_ref ($branch): merged into $base but has ${reason_text%, }; check before removing"
+    else
+      info "✅ $wt_ref ($branch): merged into $base, clean, no terminals — orca worktree rm --worktree path:$wt_path"
+      ready_count=$((ready_count + 1))
+    fi
+  done < <(jq -r '.result.worktrees[] | select(.isMainWorktree | not) | .path' <<<"$worktrees_json")
+
+  info "$active_count active, $ready_count ready to remove (morning never removes worktrees)"
+  if [ "$ready_count" -gt 0 ]; then
+    info "Their branches stay until the worktree is removed; run morning again afterwards."
+  fi
+fi
+
+# --- Merged branches ---
+section "Merged branches"
+
+if [ "${#valid_repos[@]}" -eq 0 ]; then
+  info "No repositories to clean"
+fi
+for repo in "${valid_repos[@]}"; do
+  printf '\n▸ %s\n' "$(ref "$repo")"
+  if [ "$dry_run" = true ]; then
+    (cd "$repo" && "$SCRIPT_DIR/sync-branch" --dry-run) || warn "$(ref "$repo"): sync-branch failed"
+  else
+    (cd "$repo" && "$SCRIPT_DIR/sync-branch") || warn "$(ref "$repo"): sync-branch failed"
+  fi
+done
+
+echo ""
+if [ "$warn_count" -eq 0 ]; then
+  echo "🌅 Done."
+else
+  echo "🌅 Done with $warn_count warning(s)."
+fi

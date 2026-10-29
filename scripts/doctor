@@ -9,6 +9,7 @@ source "$DOTFILES_DIR/lib/shell-config.sh" || exit 1
 source "$DOTFILES_DIR/lib/agent-policy.sh" || exit 1
 source "$DOTFILES_DIR/lib/local-env.sh" || exit 1
 source "$DOTFILES_DIR/lib/work-notes.sh" || exit 1
+source "$DOTFILES_DIR/lib/morning.sh" || exit 1
 PASS="✅ PASS"
 WARN="⚠️ WARN"
 FAIL="❌ FAIL"
@@ -532,6 +533,28 @@ else
     fi
   done < <(work_notes_entries "$work_notes_path")
 fi
+
+# --- Morning ---
+section "Morning"
+
+local_env_load MORNING_REPOS
+morning_paths=()
+while IFS= read -r morning_path; do
+  morning_paths+=("$morning_path")
+done < <(morning_repo_paths)
+
+if [ "${#morning_paths[@]}" -eq 0 ]; then
+  check_warn "morning has no repositories to sync; set MORNING_REPOS in alias/.env (colon-separated paths)"
+fi
+for morning_path in "${morning_paths[@]}"; do
+  morning_ref="$(shell_config_ref "$morning_path" tilde)"
+  morning_problem="$(morning_repo_problem "$morning_path")"
+  if [ -n "$morning_problem" ]; then
+    check_warn "morning repository $morning_ref $morning_problem — fix MORNING_REPOS in alias/.env"
+  else
+    check_pass "morning repository $morning_ref is ready"
+  fi
+done
 
 # --- Summary ---
 echo ""
