@@ -30,7 +30,7 @@ fi
 
 - Missing: tell the user to set `WORK_NOTES_REPO` in `alias/.env` and run `install.sh`; stop.
 - Pull failed: show `git -C "$NOTES_DIR" status --short` and stop. Do not resolve conflicts in notes without asking, and never force-push.
-- Start-of-work request (only pulling): report `git -C "$NOTES_DIR" log --oneline "$BEFORE"..HEAD` when the pull brought commits (run it in the same shell as the pull), read the board or status file if the README defines one, then stop.
+- Start-of-work request (only pulling): report `git -C "$NOTES_DIR" log --oneline "$BEFORE"..HEAD` when the pull brought commits (run it in the same shell as the pull), read the board or status file if the README defines one, then read the README's agent section, the current project's agent guide if the README defines one, and any routing or delegation guide they link (for example how to split work and choose agents and models), so the session follows them from the start. Then stop.
 
 ## 2. Update the notes
 
