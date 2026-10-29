@@ -1,11 +1,11 @@
 ---
 name: sync-work-notes
-description: 'Sync the private work-notes repository: pull first, record what this session decided or finished (decisions, reports, agent memory) following the notes README, check for secrets, then commit and push. Also pulls at the start of work. Use when: sync work notes, update work notes, end of day, 下班, 更新 work notes, 同步筆記.'
+description: 'Sync the private work-notes repository: pull first, record what this session decided or finished (decisions, reports, agent memory) following the notes README, check for secrets, then commit on a notes branch, push it, and open a pull request for the user to review. Also pulls at the start of work. Use when: sync work notes, update work notes, end of day, 下班, 更新 work notes, 同步筆記.'
 ---
 
 # Sync Work Notes
 
-The work notes are a private Git repository that `install.sh` clones and links (see the dotfiles README, "Work notes"). The user invoking this skill authorizes one commit and one push of the notes; it does not authorize any other outward action.
+The work notes are a private Git repository that `install.sh` clones and links (see the dotfiles README, "Work notes"). Notes reach `main` only through a pull request that the user reviews and merges. The user invoking this skill authorizes one commit, one push of a notes branch, and opening (or updating) one pull request; it never authorizes pushing to `main` or merging, and it does not authorize any other outward action.
 
 Follow the dotfiles credential policy throughout. Never print the notes remote URL: keep Git network commands quiet and report only success or failure.
 
@@ -16,9 +16,17 @@ source "$(command -v local-env)" WORK_NOTES_DIR
 NOTES_DIR="${WORK_NOTES_DIR:-$HOME/work-notes}"
 git -C "$NOTES_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || echo "missing"
 git -C "$NOTES_DIR" status --short
+BRANCH="$(git -C "$NOTES_DIR" branch --show-current)"
 BEFORE="$(git -C "$NOTES_DIR" rev-parse HEAD)"
-if git -C "$NOTES_DIR" pull --rebase --autostash --quiet >/dev/null 2>&1; then echo "pulled"; else echo "pull failed"; fi
+git -C "$NOTES_DIR" fetch --quiet origin >/dev/null 2>&1 || echo "fetch failed"
+if [ "$BRANCH" = "main" ]; then
+  if git -C "$NOTES_DIR" pull --rebase --autostash --quiet >/dev/null 2>&1; then echo "pulled"; else echo "pull failed"; fi
+else
+  echo "on branch $BRANCH; origin/main commits not in it: $(git -C "$NOTES_DIR" rev-list --count HEAD..origin/main)"
+fi
 ```
+
+- On a notes branch: keep working on it (its PR is still open or not yet created). If `origin/main` has commits the branch lacks, tell the user and ask before rebasing; check with `gh pr list --head "$BRANCH" --state all` whether its PR was already merged, and if so ask whether to start a fresh branch from `origin/main`.
 
 - Missing: tell the user to set `WORK_NOTES_REPO` in `alias/.env` and run `install.sh`; stop.
 - Pull failed: show `git -C "$NOTES_DIR" status --short` and stop. Do not resolve conflicts in notes without asking, and never force-push.
@@ -45,15 +53,24 @@ git -C "$NOTES_DIR" diff --cached -U0 | grep -nE '(ghp_|github_pat_|pk_[A-Za-z0-
 
 The last command prints only diff line numbers. If it prints anything, unstage (`git -C "$NOTES_DIR" reset -q`), tell the user which file looks sensitive without quoting it, and stop. Also confirm `links.local.tsv` is not staged; it is machine-specific.
 
-## 4. Commit and push
+## 4. Commit on a branch, ask, push, open a PR
+
+Never commit to `main`. If the current branch is `main`, create a branch first; uncommitted changes move with it:
 
 ```bash
+[ "$(git -C "$NOTES_DIR" branch --show-current)" = "main" ] && git -C "$NOTES_DIR" switch -q -c "notes/$(date +%Y-%m-%d)-<short-slug>"
 git -C "$NOTES_DIR" commit -q -m "<short English summary of what changed>"
-if git -C "$NOTES_DIR" push --quiet >/dev/null 2>&1; then echo "push ok"; else echo "push failed"; fi
 ```
 
-No AI attribution or co-author trailers. If nothing changed, say so and skip the commit. If the push fails, leave the commit in place and report it; `doctor` will show it as unpushed.
+Before pushing, list anything you are unsure about (where an entry belongs, wording, whether something is private, files changed by another session) and ask the user. Push only after they answer; never push on a guess.
+
+```bash
+if git -C "$NOTES_DIR" push --quiet -u origin HEAD >/dev/null 2>&1; then echo "push ok"; else echo "push failed"; fi
+(cd "$NOTES_DIR" && gh pr view --json url -q .url 2>/dev/null || gh pr create --base main --fill)
+```
+
+`gh pr create --fill` uses the commit messages; give it `--title`/`--body` when the branch has several commits. Do not merge the PR, approve it, or enable auto-merge; the user reviews and merges it. No AI attribution or co-author trailers. If nothing changed, say so and skip the commit. If the push fails, leave the commit in place and report it; `doctor` will show it as unpushed.
 
 ## 5. Report
 
-One short list: files changed with a phrase each, the commit hash, and whether the push succeeded.
+One short list: files changed with a phrase each, the branch and commit hash, whether the push succeeded, and the PR link.

@@ -148,7 +148,7 @@ Repository-managed skills:
 | `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals and current checks, then close out ClickUp (Azure DevOps) and worktrees |
 | `squash-git-commits` | Squash feature-branch commits into one relative to the selected PR or repository target branch |
 | `summarize-pr` | Summarize branch changes and update the Azure DevOps PR description |
-| `sync-work-notes` | Pull the private work notes, update decisions, reports, and memory from the current session, then commit and push |
+| `sync-work-notes` | Pull the private work notes, update decisions, reports, and memory from the current session, then commit on a branch and open a PR for review |
 
 To add a shared skill, create `~/dotfiles/skills/my-skill/SKILL.md` and run `./install.sh`. The installer creates all four per-skill links; no manual links are needed.
 
@@ -276,7 +276,7 @@ claude-memory   impress/memory    code/my-project
   claude-memory   impress/memory    code/my-project
   ```
 
-Existing targets are never replaced. To move an existing Claude memory directory into the notes, copy its files into the source directory, remove the original directory, and run `./install.sh` again. `doctor` fetches the notes and reports missing links, uncommitted notes, commits that are not pushed yet, and commits from another machine that are not pulled yet. The `sync-work-notes` skill pulls, updates the notes from the current session, commits, and pushes; run it at the end of a work session.
+Existing targets are never replaced. To move an existing Claude memory directory into the notes, copy its files into the source directory, remove the original directory, and run `./install.sh` again. `doctor` fetches the notes and reports missing links, uncommitted notes, commits that are not pushed yet, and commits from another machine that are not pulled yet. The `sync-work-notes` skill pulls, updates the notes from the current session, commits on a notes branch, and opens a pull request; notes reach `main` only after you review and merge it. Run it at the end of a work session.
 
 Keep secrets out of the notes exactly as in this repository: tokens stay in `alias/.env`, and remote URLs with credentials are never written down. The notes repository's own README describes what belongs in it.
 
