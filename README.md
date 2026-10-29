@@ -556,6 +556,73 @@ gen-tax-id -n 5     # generate five numbers
 
 The checksum is computed deterministically from the first 7 digits so the output is always valid — no rejection sampling needed.
 
+### `image-shrink`
+
+Resize and compress a local JPEG, PNG, WebP, or HEIC/HEIF image to a maximum
+file size. Requires ImageMagick (`brew install imagemagick`); Homebrew includes
+`libheif` for iPhone photos. All processing stays on your machine.
+
+```sh
+image-shrink photo.jpg                                  # default: at most 500 KB
+image-shrink photo.jpg --max-size 0.5MB                  # 500,000 bytes
+image-shrink photo.jpg --max-size 500KB --max-side 1600   # longest edge at most 1600
+image-shrink photo.jpg --max-size 500KB --keep-dimensions # compression only
+image-shrink IMG_1234.HEIC --max-size 500KB               # keep HEIC format
+image-shrink IMG_1234.HEIC --format jpg -o share.jpg      # convert for sharing
+image-shrink screenshot.png --format webp               # explicit conversion
+image-shrink                                           # prompts; also available in cmds
+```
+
+With no arguments in a terminal, prompts ask for an image path, maximum file size
+(default `500KB`), optional maximum longest edge, and output format (default: same).
+When `fzf` is installed, an image picker opens in the current directory. Type to
+filter the supported images and directories; use **Up/Down** or **Tab/Shift-Tab**
+to move, then **Enter** to select an image or open a directory. Select `../` to go
+up a directory, or **Esc** to cancel before processing anything. Hidden entries
+are included. Files without a supported image extension are omitted.
+
+Choose `[Enter a path]` to paste an unquoted path elsewhere. Without `fzf`, this
+path prompt opens directly: **Tab** completes paths and lists ambiguous matches.
+Filename completion handles spaces and backslashes; entered shell expressions
+are never evaluated. The picker also works through `cmds`. `fzf` is optional and
+already included in `Brewfile` (`brew install fzf`).
+
+With arguments, the command never prompts; quote paths containing spaces in shell
+commands. Use `--` before a filename beginning with a dash.
+
+The default output is a sibling such as `photo.small.jpg` or `IMG_1234.small.heic`.
+The original is retained and existing output files, directories, and symlinks are
+never replaced. `-o` selects another output path; its extension selects the format
+and must agree with `--format` if both are supplied. The output directory must
+already exist and support hard links; a private working directory there is removed
+on completion or interruption, and a verified result is published atomically.
+
+`KB`/`MB` use decimal units; `KiB`/`MiB` use binary units. Sizes can be fractional
+and are rounded down to whole bytes (accepted range: 1 byte to 1 TB). The tool
+reports exact before/after byte counts and dimensions. It skips an image already
+under the limit unless a resize, format, or output path is explicitly requested.
+
+For JPEG, WebP, and HEIC, it first tries encoder quality 90, then searches down to
+60 at the current dimensions. If needed, it progressively reduces dimensions,
+preserving proportions and never enlarging. PNG uses lossless compression at each
+resolution; smaller PNG targets can require a resize or an explicit conversion to
+WebP. Every attempt derives from the same lossless, oriented working image rather
+than a previously compressed result. Color profiles are retained.
+
+Automatic resizing stops at a 320-pixel longest edge, or the starting edge if
+smaller. An explicit `--max-side` below 320 is respected; values from 1 to 100000
+are accepted. `--keep-dimensions` prevents all resizing and cannot be combined
+with `--max-side`. If the target cannot be met within these bounds, the command
+fails without publishing an oversized output. A size limit may require visible
+loss of detail; encoder quality is not a guarantee of perceived quality.
+
+Orientation is applied before resizing. Transparency is retained for supported
+formats; conversion of a transparent image to JPEG is rejected. Only the primary
+still image is processed, including for HEIC and animated inputs. Output does not
+promise to retain Live Photo video, auxiliary depth data, or HDR gain maps. The
+command checks that the installed ImageMagick supports the requested codecs;
+`doctor` also checks HEIC reading and writing.
+
 ### `cmds`
 
 Interactive menu to browse and run any script in the `scripts/` directory.
@@ -572,7 +639,7 @@ and on cancellation or interruption.
 
 `Brewfile` holds two categories of packages:
 
-1. **Dotfiles dependencies**, used directly by the scripts and shell behavior: `git-delta`, `fzf`, `jq`, `azure-cli`, `gh`, `python`, `starship`, `shellcheck`, and the Hack Nerd Font cask. The table below lists what uses each one.
+1. **Dotfiles dependencies**, used directly by the scripts and shell behavior: `git-delta`, `fzf`, `jq`, `azure-cli`, `gh`, `python`, `starship`, `shellcheck`, `imagemagick`, and the Hack Nerd Font cask. The table below lists what uses each one.
 2. **Workstation baseline**, standard tools wanted on every development Mac that the repository does not itself invoke: `gawk` and `pyenv`. They are installed for convenience and have no "Required by" entry. The shared zsh configuration does not initialise pyenv; see [Design decisions](#design-decisions) to enable it.
 
 `./install.sh --install-deps` installs only the missing packages and leaves installed ones as they are. `doctor` checks the tools in the table that affect dotfiles functionality and reports the ones still missing; it does not check the baseline packages. Install Homebrew first (https://brew.sh). Docker is not included. oh-my-zsh is not a Homebrew package; `--install-deps` clones it separately.
@@ -580,13 +647,14 @@ and on cancellation or interruption.
 | Tool | Required by | Install |
 |------|-------------|---------|
 | `delta` | git diff pager | `brew install git-delta` |
-| `fzf` | `cmds`, `track-branch` (optional; both have Bash fallbacks); shell key bindings in `zsh/.zshrc.shared` (0.48+, optional) | `brew install fzf` |
+| `fzf` | `cmds`, `track-branch`, `image-shrink` picker (optional; all have Bash fallbacks); shell key bindings in `zsh/.zshrc.shared` (0.48+, optional) | `brew install fzf` |
 | `jq` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`; optional PR lookup in `repo` | `brew install jq` |
 | `curl` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`; optional PR lookup in `repo` | usually pre-installed |
 | `az` | Azure DevOps profiles configured with `auth = azure-cli` | `brew install azure-cli` |
 | `gh` | GitHub mode of `create-pr`; optional GitHub auth for `repo` | `brew install gh` |
 | `starship` | shared prompt (`zsh/starship.toml`); needs a Nerd Font, falls back to the oh-my-zsh theme without it | `brew install starship` |
 | `shellcheck` | lint of `install.sh`, `scripts/*`, `lib/*.sh`, and `tests/*.sh` in CI and before committing shell changes (see `AGENTS.md`) | `brew install shellcheck` |
+| `magick` | `image-shrink`; includes `libheif` for HEIC/HEIF input and output | `brew install imagemagick` |
 | Nerd Font | starship prompt icons; without one (or without selecting it in the terminal profile) icons render as boxes | `brew install --cask font-hack-nerd-font`, then pick **Hack Nerd Font** in the terminal's font setting |
 | `python3` | `server` alias; regression test suites | `brew install python` |
 | Docker CLI and running daemon | `docker-clean` (includes stopped containers) | Docker Desktop or another Docker daemon |
@@ -763,11 +831,12 @@ git diff --check
 for file in tests/*.sh; do /bin/bash "$file" || exit 1; done
 ```
 
-The regression suites require Git, `jq`, Zsh, Python 3, and Ruby (preinstalled on macOS; the CI workflow test parses YAML with it). They use temporary
+The regression suites require Git, `jq`, Zsh, Python 3, ImageMagick (with HEIC support), `fzf`, and Ruby (preinstalled on macOS; the CI workflow test parses YAML with it). They use temporary
 homes and repositories, API/push shims, and a pseudo-terminal; they do not perform
 real PR mutations or migrations against your home directory. Coverage includes
 installer idempotency and skill migration, diagnostic accuracy, API failures,
-branch preservation, bookmark quoting, menu cleanup, and the behind-origin check.
+branch preservation, bookmark quoting, menu cleanup, the behind-origin check,
+and image size limits, format conversion, transparency, orientation, and output preservation.
 
 GitHub Actions runs these checks on macOS for pushes to `master` and for pull requests targeting `master`, so a commit on a PR branch is checked once. A newer push to a PR cancels that PR's superseded run; `master` runs are never cancelled.
 

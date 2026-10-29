@@ -28,6 +28,8 @@ jobs:
         run: |
           command -v jq >/dev/null || brew install jq
           command -v shellcheck >/dev/null || brew install shellcheck
+          command -v magick >/dev/null || brew install imagemagick
+          command -v fzf >/dev/null || brew install fzf
       - name: Check shell syntax and whitespace
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}

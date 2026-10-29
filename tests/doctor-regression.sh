@@ -79,6 +79,7 @@ grep -Fq '⚠️ WARN: GIT_WORK_NAME and GIT_WORK_EMAIL are optional' "$TEST_CAS
 grep -Fq '⚠️ WARN: starship not found — shared prompt unavailable' "$TEST_CASE_DIR/output" || fail "missing starship was not reported as a warning"
 grep -Fq '⚠️ WARN: delta not found — configured Git pager is unavailable (brew install git-delta)' "$TEST_CASE_DIR/output" || fail "missing delta warning did not explain the configured Git pager"
 grep -Fq '⚠️ WARN: python3 not found — server alias and some regression checks are unavailable (brew install python)' "$TEST_CASE_DIR/output" || fail "missing python3 was not reported as a warning"
+grep -Fq '⚠️ WARN: magick not found — image-shrink is unavailable (brew install imagemagick)' "$TEST_CASE_DIR/output" || fail "missing ImageMagick was not reported as a warning"
 grep -Fq '❌ 0 failures' "$TEST_CASE_DIR/output" || fail "warnings-only summary reported a failure"
 # gawk and pyenv are workstation baseline packages, not dotfiles dependencies.
 if grep -Eq 'gawk|pyenv' "$TEST_CASE_DIR/output"; then
@@ -96,6 +97,24 @@ grep -Fq '✅ PASS: python3 installed' "$TEST_CASE_DIR/output" || fail "availabl
 if grep -Fq 'python3 not found' "$TEST_CASE_DIR/output"; then
   fail "available python3 was still reported missing"
 fi
+
+mkdir -p "$TEST_CASE_DIR/image-bin" || fail "could not create ImageMagick stub directory"
+cat > "$TEST_CASE_DIR/image-bin/magick" <<'EOF'
+#!/bin/bash
+printf 'HEIC HEIC rw+ Apple High Efficiency Image Format\n'
+EOF
+chmod +x "$TEST_CASE_DIR/image-bin/magick" || fail "could not make ImageMagick stub executable"
+run_doctor PATH="$TEST_CASE_DIR/image-bin:$TEST_BIN" > "$TEST_CASE_DIR/output" 2>&1
+[ "$?" -eq 0 ] || fail "available ImageMagick failed doctor"
+grep -Fq '✅ PASS: magick installed' "$TEST_CASE_DIR/output" || fail "available ImageMagick was not recognized"
+grep -Fq '✅ PASS: ImageMagick HEIC reading and writing are available' "$TEST_CASE_DIR/output" || fail "HEIC support was not recognized"
+cat > "$TEST_CASE_DIR/image-bin/magick" <<'EOF'
+#!/bin/bash
+printf 'JPEG* JPEG rw- JPEG format\n'
+EOF
+run_doctor PATH="$TEST_CASE_DIR/image-bin:$TEST_BIN" > "$TEST_CASE_DIR/output" 2>&1
+[ "$?" -eq 0 ] || fail "missing HEIC codec failed doctor instead of warning"
+grep -Fq '⚠️ WARN: ImageMagick HEIC support is unavailable' "$TEST_CASE_DIR/output" || fail "missing HEIC codec was not reported"
 
 run_doctor PATH="$TEST_DOTFILES/scripts:$TEST_BIN" > "$TEST_CASE_DIR/output" 2>&1
 status=$?

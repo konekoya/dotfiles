@@ -131,7 +131,7 @@ Canonical Git configuration files linked into the user's home directory by `inst
 - For Git branch or worktree helper changes, use temporary repositories, remotes, and worktrees where practical.
 - Run checks that match the changed code; do not add a test framework for these utilities.
 - Scripts locate the repository from their own path, so tests copy the script under test (and `lib/`) into the fixture's dotfiles directory instead of running the real one against a temporary `HOME`. This also keeps a developer's real `alias/.env` out of the tests.
-- Existing regression suites are in `tests/*.sh`; run them with `/bin/bash` for macOS Bash compatibility. They require Git, `jq`, Zsh, Python 3, and Ruby (preinstalled on macOS; used to parse the CI workflow YAML) and use temporary fixtures and mocked API/push commands. GitHub Actions runs them on macOS.
+- Existing regression suites are in `tests/*.sh`; run them with `/bin/bash` for macOS Bash compatibility. They require Git, `jq`, Zsh, Python 3, ImageMagick (with HEIC support), `fzf`, and Ruby (preinstalled on macOS; used to parse the CI workflow YAML) and use temporary fixtures, generated images, and mocked API/push commands. GitHub Actions runs them on macOS.
 
 ## Documentation Rules
 
