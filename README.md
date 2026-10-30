@@ -672,7 +672,7 @@ and on cancellation or interruption.
 | `fzf` | `cmds`, `track-branch`, `image-shrink` picker (optional; all have Bash fallbacks); shell key bindings in `zsh/.zshrc.shared` (0.48+, optional) | `brew install fzf` |
 | `jq` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`; optional PR lookup in `repo` | `brew install jq` |
 | `curl` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`; optional PR lookup in `repo` | usually pre-installed |
-| `az` | Azure DevOps profiles configured with `auth = azure-cli` | `brew install azure-cli` |
+| `az` | Azure DevOps profiles configured with `auth = azure-cli` | `brew install --cask azure-cli` |
 | `gh` | GitHub mode of `create-pr`; optional GitHub auth for `repo` | `brew install gh` |
 | `starship` | shared prompt (`zsh/starship.toml`); needs a Nerd Font, falls back to the oh-my-zsh theme without it | `brew install starship` |
 | `shellcheck` | lint of `install.sh`, `scripts/*`, `lib/*.sh`, and `tests/*.sh` in CI and before committing shell changes (see `AGENTS.md`) | `brew install shellcheck` |

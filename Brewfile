@@ -2,7 +2,7 @@
 brew "git-delta"
 brew "fzf"
 brew "jq"
-brew "azure-cli"
+cask "azure-cli"
 brew "gh"
 brew "shellcheck"
 brew "imagemagick" # image-shrink; includes libheif for HEIC/HEIF support
