@@ -41,10 +41,10 @@ setup_fixture() {
   cp "$REPO_ROOT/git/.gitignore_global" "$TEST_DOTFILES/git/.gitignore_global" || fail "could not copy gitignore for $name"
   printf '# sample skill\n' > "$TEST_SKILL/SKILL.md"
   : > "$TEST_DOTFILES/alias/.env"
-  mkdir -p "$TEST_HOME/.claude/skills" "$TEST_HOME/.copilot/skills" "$TEST_HOME/.agents/skills" "$TEST_HOME/.kiro/skills" || fail "could not create tool directories for $name"
+  mkdir -p "$TEST_HOME/.claude/skills" "$TEST_HOME/.copilot/skills" "$TEST_HOME/.agents/skills" || fail "could not create tool directories for $name"
   ln -s "$TEST_DOTFILES/git/.gitconfig" "$TEST_HOME/.gitconfig" || fail "could not link git config for $name"
   ln -s "$TEST_DOTFILES/git/.gitignore_global" "$TEST_HOME/.gitignore_global" || fail "could not link gitignore for $name"
-  for tool_dir in "$TEST_HOME/.claude/skills" "$TEST_HOME/.copilot/skills" "$TEST_HOME/.agents/skills" "$TEST_HOME/.kiro/skills"; do
+  for tool_dir in "$TEST_HOME/.claude/skills" "$TEST_HOME/.copilot/skills" "$TEST_HOME/.agents/skills"; do
     ln -s "$TEST_SKILL" "$tool_dir/sample-skill" || fail "could not link skill for $name"
   done
   cat > "$TEST_HOME/.zshrc" <<'EOF'
@@ -299,14 +299,14 @@ grep -Fq '❌ FAIL: ~/.gitconfig is missing — run install.sh' "$TEST_CASE_DIR/
 setup_fixture claude-plugin-skill
 mkdir -p "$TEST_DOTFILES/skills/skill-creator" || fail "could not prepare plugin skill"
 printf '# skill creator\n' > "$TEST_DOTFILES/skills/skill-creator/SKILL.md"
-for tool_dir in "$TEST_HOME/.copilot/skills" "$TEST_HOME/.agents/skills" "$TEST_HOME/.kiro/skills"; do
+for tool_dir in "$TEST_HOME/.copilot/skills" "$TEST_HOME/.agents/skills"; do
   ln -s "$TEST_DOTFILES/skills/skill-creator" "$tool_dir/skill-creator" || fail "could not link plugin skill"
 done
 run_doctor > "$TEST_CASE_DIR/output" 2>&1
 status=$?
 [ "$status" -eq 0 ] || fail "skipped Claude skill returned status $status"
 grep -Fq '✅ PASS: Claude Code: all 1 shared skill links are correct' "$TEST_CASE_DIR/output" || fail "skipped skill was expected for Claude Code"
-grep -Fq '✅ PASS: Kiro CLI: all 2 shared skill links are correct' "$TEST_CASE_DIR/output" || fail "plugin skill was not expected for Kiro CLI"
+grep -Fq '✅ PASS: Codex: all 2 shared skill links are correct' "$TEST_CASE_DIR/output" || fail "plugin skill was not expected for Codex"
 
 ln -s "$TEST_DOTFILES/skills/skill-creator" "$TEST_HOME/.claude/skills/skill-creator" || fail "could not add duplicate Claude link"
 run_doctor > "$TEST_CASE_DIR/output" 2>&1

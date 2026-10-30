@@ -183,8 +183,8 @@ fi
 # --- Shared AI Skills ---
 section "Shared AI Skills"
 
-tool_labels=("Claude Code" "GitHub Copilot CLI" "Codex" "Kiro CLI")
-tool_dirs=("$HOME/.claude/skills" "$HOME/.copilot/skills" "$HOME/.agents/skills" "$HOME/.kiro/skills")
+tool_labels=("Claude Code" "GitHub Copilot CLI" "Codex")
+tool_dirs=("$HOME/.claude/skills" "$HOME/.copilot/skills" "$HOME/.agents/skills")
 # Skills Claude Code ships as an official plugin; install.sh does not link the
 # repository copy there. Keep this list in sync with install.sh.
 tool_skipped=("skill-creator" "" "" "")

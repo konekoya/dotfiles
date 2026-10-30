@@ -4,9 +4,9 @@
 
 agent_policy_init() {
   AGENT_POLICY_SOURCE="$DOTFILES_DIR/agents/security.md"
-  agent_policy_labels=("Codex CLI" "Claude Code" "Kiro CLI" "GitHub Copilot CLI")
-  agent_policy_roots=("${CODEX_HOME:-$HOME/.codex}" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$HOME/.kiro" "${COPILOT_HOME:-$HOME/.copilot}")
-  agent_policy_suffixes=("AGENTS.md" "rules/dotfiles-security.md" "steering/dotfiles-security.md" "copilot-instructions.md")
+  agent_policy_labels=("Codex CLI" "Claude Code" "GitHub Copilot CLI")
+  agent_policy_roots=("${CODEX_HOME:-$HOME/.codex}" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${COPILOT_HOME:-$HOME/.copilot}")
+  agent_policy_suffixes=("AGENTS.md" "rules/dotfiles-security.md" "copilot-instructions.md")
 }
 
 # Refuse to traverse user-managed directory links, including dangling links.
@@ -82,5 +82,4 @@ check_agent_policy() {
       check_warn "$label: optional global security policy is missing — run install.sh"
     fi
   done
-  check_warn "Kiro CLI: verify the active agent includes global steering resources; custom profiles can omit them"
 }

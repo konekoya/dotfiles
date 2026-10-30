@@ -59,15 +59,16 @@ setup_fixture missing-and-idempotent
 run_installer > "$TEST_CASE_DIR/first-output" 2>&1 || fail "installer failed on missing targets"
 assert_link_target "$TEST_HOME/.gitconfig" "$TEST_DOTFILES/git/.gitconfig"
 assert_link_target "$TEST_HOME/.gitignore_global" "$TEST_DOTFILES/git/.gitignore_global"
-for entry in .codex/AGENTS.md .claude/rules/dotfiles-security.md .kiro/steering/dotfiles-security.md .copilot/copilot-instructions.md; do
+for entry in .codex/AGENTS.md .claude/rules/dotfiles-security.md .copilot/copilot-instructions.md; do
   assert_link_target "$TEST_HOME/$entry" "$TEST_DOTFILES/agents/security.md"
 done
+[ ! -e "$TEST_HOME/.kiro" ] || fail "installer created a Kiro directory"
 grep -Fq 'Linked ' "$TEST_CASE_DIR/first-output" || fail "missing Git config targets were not reported as linked"
 grep -Fq 'Run `doctor` to verify' "$TEST_CASE_DIR/first-output" || fail "installer did not recommend doctor"
 run_installer > "$TEST_CASE_DIR/second-output" 2>&1 || fail "installer failed on its second run"
 grep -Fq "$TEST_HOME/.gitconfig already linked" "$TEST_CASE_DIR/second-output" || fail "correct .gitconfig link was not recognized"
 grep -Fq "$TEST_HOME/.gitignore_global already linked" "$TEST_CASE_DIR/second-output" || fail "correct .gitignore_global link was not recognized"
-[ "$(grep -c 'security policy already linked' "$TEST_CASE_DIR/second-output")" -eq 4 ] || fail "global policy links were not idempotent"
+[ "$(grep -c 'security policy already linked' "$TEST_CASE_DIR/second-output")" -eq 3 ] || fail "global policy links were not idempotent"
 [ "$(grep -Fxc 'source ~/dotfiles/alias/.alias' "$TEST_HOME/.zshrc")" -eq 1 ] || fail "repeated runs duplicated the alias source"
 [ "$(grep -Fxc 'export PATH="$HOME/dotfiles/scripts:$PATH"' "$TEST_HOME/.zshrc")" -eq 1 ] || fail "repeated runs duplicated the scripts PATH"
 [ "$(stat -f '%Lp' "$TEST_DOTFILES/alias/.env")" = 600 ] || fail "new environment file is not private"
@@ -115,7 +116,7 @@ run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "first skill install failed
 grep -Fq 'Linked Claude Code skill sample-skill' "$TEST_CASE_DIR/output" || fail "new skill link was not reported"
 run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "second skill install failed"
 grep -Fq 'Claude Code: all 1 skills already linked.' "$TEST_CASE_DIR/output" || fail "linked skills were not summarized for Claude Code"
-grep -Fq 'Kiro CLI: all 1 skills already linked.' "$TEST_CASE_DIR/output" || fail "linked skills were not summarized for Kiro CLI"
+grep -Fq 'GitHub Copilot CLI: all 1 skills already linked.' "$TEST_CASE_DIR/output" || fail "linked skills were not summarized for Copilot"
 if grep -Fq 'skill sample-skill' "$TEST_CASE_DIR/output"; then
   fail "already linked skills were still listed one by one"
 fi
@@ -135,7 +136,7 @@ for link_style in absolute relative legacy chained; do
   mkdir -p "$TEST_DOTFILES/skills/create-pr" "$TEST_DOTFILES/claude/skills" || fail "could not prepare renamed skill"
   printf '# PR skill\n' > "$TEST_DOTFILES/skills/create-pr/SKILL.md"
   ln -s "$TEST_DOTFILES/skills" "$TEST_CASE_DIR/source-skills" || fail "could not prepare chained source"
-  for tool in .claude .copilot .agents .kiro; do
+  for tool in .claude .copilot .agents; do
     mkdir -p "$TEST_HOME/$tool/skills" || fail "could not prepare tool skills"
     case "$link_style" in
       absolute) link_target="$TEST_DOTFILES/skills/create-azure-pr" ;;
@@ -147,7 +148,7 @@ for link_style in absolute relative legacy chained; do
   done
   run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "renamed skill migration failed"
   run_installer >> "$TEST_CASE_DIR/output" 2>&1 || fail "repeated renamed skill migration failed"
-  for tool in .claude .copilot .agents .kiro; do
+  for tool in .claude .copilot .agents; do
     assert_link_target "$TEST_HOME/$tool/skills/create-pr" "$TEST_DOTFILES/skills/create-pr"
     [ ! -e "$TEST_HOME/$tool/skills/create-azure-pr" ] && \
       [ ! -L "$TEST_HOME/$tool/skills/create-azure-pr" ] || fail "old installer-owned PR skill link remains"
@@ -158,17 +159,14 @@ done
 setup_fixture renamed-pr-skill-conflicts
 mkdir -p "$TEST_DOTFILES/skills/create-pr" "$TEST_CASE_DIR/custom-skill" || fail "could not prepare conflict sources"
 printf '# PR skill\n' > "$TEST_DOTFILES/skills/create-pr/SKILL.md"
-for tool in .claude .copilot .agents .kiro; do
+for tool in .claude .copilot .agents; do
   mkdir -p "$TEST_HOME/$tool/skills" || fail "could not prepare conflict destinations"
 done
 mkdir -p "$TEST_HOME/.claude/skills/create-azure-pr" || fail "could not prepare custom old directory"
 printf 'custom skill\n' > "$TEST_HOME/.claude/skills/create-azure-pr/SKILL.md"
 ln -s "$TEST_CASE_DIR/custom-skill" "$TEST_HOME/.copilot/skills/create-azure-pr" || fail "could not prepare custom old link"
 printf 'custom replacement\n' > "$TEST_HOME/.agents/skills/create-pr"
-ln -s "$TEST_CASE_DIR/missing-custom-skill" "$TEST_HOME/.kiro/skills/create-pr" || fail "could not prepare broken custom replacement"
-for tool in .agents .kiro; do
-  ln -s "$TEST_DOTFILES/skills/create-azure-pr" "$TEST_HOME/$tool/skills/create-azure-pr" || fail "could not prepare blocked old link"
-done
+ln -s "$TEST_DOTFILES/skills/create-azure-pr" "$TEST_HOME/.agents/skills/create-azure-pr" || fail "could not prepare blocked old link"
 run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "renamed skill conflicts failed"
 run_installer >> "$TEST_CASE_DIR/output" 2>&1 || fail "repeated renamed skill conflicts failed"
 [ "$(cat "$TEST_HOME/.claude/skills/create-azure-pr/SKILL.md")" = 'custom skill' ] || fail "custom old directory changed"
@@ -177,10 +175,18 @@ for tool in .claude .copilot; do
   assert_link_target "$TEST_HOME/$tool/skills/create-pr" "$TEST_DOTFILES/skills/create-pr"
 done
 [ "$(cat "$TEST_HOME/.agents/skills/create-pr")" = 'custom replacement' ] || fail "custom replacement file changed"
-assert_link_target "$TEST_HOME/.kiro/skills/create-pr" "$TEST_CASE_DIR/missing-custom-skill"
-for tool in .agents .kiro; do
-  assert_link_target "$TEST_HOME/$tool/skills/create-azure-pr" "$TEST_DOTFILES/skills/create-azure-pr"
-done
+assert_link_target "$TEST_HOME/.agents/skills/create-azure-pr" "$TEST_DOTFILES/skills/create-azure-pr"
+
+# A broken custom replacement also blocks cleanup of the old link.
+setup_fixture renamed-pr-skill-broken-replacement
+mkdir -p "$TEST_DOTFILES/skills/create-pr" "$TEST_HOME/.agents/skills" || fail "could not prepare broken replacement"
+printf '# PR skill\n' > "$TEST_DOTFILES/skills/create-pr/SKILL.md"
+ln -s "$TEST_CASE_DIR/missing-custom-skill" "$TEST_HOME/.agents/skills/create-pr" || fail "could not prepare broken custom replacement"
+ln -s "$TEST_DOTFILES/skills/create-azure-pr" "$TEST_HOME/.agents/skills/create-azure-pr" || fail "could not prepare blocked old link"
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "broken replacement install failed"
+run_installer >> "$TEST_CASE_DIR/output" 2>&1 || fail "repeated broken replacement install failed"
+assert_link_target "$TEST_HOME/.agents/skills/create-pr" "$TEST_CASE_DIR/missing-custom-skill"
+assert_link_target "$TEST_HOME/.agents/skills/create-azure-pr" "$TEST_DOTFILES/skills/create-azure-pr"
 
 # skill-creator ships with a Claude Code plugin: it is linked for the other
 # tools only, and an existing installer-owned Claude link is retired. Custom
@@ -193,14 +199,14 @@ ln -s "$TEST_DOTFILES/skills/skill-creator" "$TEST_HOME/.claude/skills/skill-cre
 run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "plugin skill install failed"
 grep -Fq 'Removed Claude Code skill link skill-creator' "$TEST_CASE_DIR/output" || fail "retiring the duplicate Claude link was not reported"
 [ ! -e "$TEST_HOME/.claude/skills/skill-creator" ] && [ ! -L "$TEST_HOME/.claude/skills/skill-creator" ] || fail "duplicate Claude skill-creator link remains"
-for tool in .copilot .agents .kiro; do
+for tool in .copilot .agents; do
   assert_link_target "$TEST_HOME/$tool/skills/skill-creator" "$TEST_DOTFILES/skills/skill-creator"
 done
 run_installer > "$TEST_CASE_DIR/second-output" 2>&1 || fail "repeated plugin skill install failed"
 [ ! -L "$TEST_HOME/.claude/skills/skill-creator" ] || fail "the duplicate Claude link came back"
 grep -Fq 'skill-creator' "$TEST_CASE_DIR/second-output" && fail "an unchanged plugin skill was still reported"
 grep -Fq 'Claude Code: all 1 skills already linked.' "$TEST_CASE_DIR/second-output" || fail "skipped skill was counted for Claude Code"
-grep -Fq 'Kiro CLI: all 2 skills already linked.' "$TEST_CASE_DIR/second-output" || fail "skipped skill was not linked for Kiro CLI"
+grep -Fq 'Codex: all 2 skills already linked.' "$TEST_CASE_DIR/second-output" || fail "skipped skill was not linked for Codex"
 
 setup_fixture claude-plugin-skill-custom
 mkdir -p "$TEST_DOTFILES/skills/skill-creator" "$TEST_CASE_DIR/custom-skill" || fail "could not prepare custom plugin skill"
@@ -211,6 +217,58 @@ printf 'custom skill\n' > "$TEST_HOME/.copilot/skills/skill-creator/SKILL.md"
 run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "custom plugin skill install failed"
 assert_link_target "$TEST_HOME/.claude/skills/skill-creator" "$TEST_CASE_DIR/custom-skill"
 [ "$(cat "$TEST_HOME/.copilot/skills/skill-creator/SKILL.md")" = 'custom skill' ] || fail "custom Copilot skill directory changed"
+
+# Kiro CLI support was removed: earlier installer links under ~/.kiro are retired,
+# and nothing else there is touched. Directories are removed only when empty.
+setup_fixture kiro-cleanup-owned
+mkdir -p "$TEST_DOTFILES/claude/skills/synced" "$TEST_HOME/.kiro/skills" "$TEST_HOME/.kiro/steering" || fail "could not prepare Kiro fixture"
+ln -s "$TEST_DOTFILES/skills/sample-skill" "$TEST_HOME/.kiro/skills/sample-skill" || fail "could not prepare absolute Kiro link"
+ln -s ../../dotfiles/skills/old-skill "$TEST_HOME/.kiro/skills/old-skill" || fail "could not prepare relative Kiro link"
+ln -s ../../dotfiles/claude/skills/legacy-skill "$TEST_HOME/.kiro/skills/legacy-skill" || fail "could not prepare legacy Kiro link"
+ln -s ../../dotfiles/claude/skills/synced "$TEST_HOME/.kiro/skills/synced" || fail "could not prepare stale synced Kiro link"
+ln -s "$TEST_DOTFILES/agents/security.md" "$TEST_HOME/.kiro/steering/dotfiles-security.md" || fail "could not prepare Kiro steering link"
+printf 'kiro settings\n' > "$TEST_HOME/.kiro/settings.json"
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "Kiro cleanup failed"
+run_installer > "$TEST_CASE_DIR/second-output" 2>&1 || fail "repeated Kiro cleanup failed"
+grep -Fq "Removed Kiro CLI link $TEST_HOME/.kiro/skills/sample-skill" "$TEST_CASE_DIR/output" || fail "Kiro skill link removal was not reported"
+[ ! -e "$TEST_HOME/.kiro/skills" ] && [ ! -L "$TEST_HOME/.kiro/skills" ] || fail "empty Kiro skills directory remains"
+[ ! -e "$TEST_HOME/.kiro/steering" ] && [ ! -L "$TEST_HOME/.kiro/steering" ] || fail "Kiro steering link or empty directory remains"
+[ "$(cat "$TEST_HOME/.kiro/settings.json")" = 'kiro settings' ] || fail "unrelated Kiro file changed"
+[ -d "$TEST_HOME/.claude/skills/synced" ] || fail "Claude synced data was not preserved"
+if grep -Fq 'Kiro' "$TEST_CASE_DIR/second-output"; then
+  fail "repeated run reported Kiro cleanup again"
+fi
+
+setup_fixture kiro-cleanup-foreign
+mkdir -p "$TEST_DOTFILES/skills/second-skill" "$TEST_CASE_DIR/elsewhere" "$TEST_HOME/.kiro/skills/synced" "$TEST_HOME/.kiro/steering" || fail "could not prepare foreign Kiro fixture"
+printf '# second skill\n' > "$TEST_DOTFILES/skills/second-skill/SKILL.md"
+ln -s "$TEST_DOTFILES/skills/sample-skill" "$TEST_HOME/.kiro/skills/sample-skill" || fail "could not prepare owned Kiro link"
+printf 'custom skill\n' > "$TEST_HOME/.kiro/skills/custom-file"
+ln -s "$TEST_CASE_DIR/elsewhere" "$TEST_HOME/.kiro/skills/custom-link" || fail "could not prepare foreign Kiro link"
+ln -s "$TEST_CASE_DIR/elsewhere" "$TEST_HOME/.kiro/skills/second-skill" || fail "could not prepare same-name foreign Kiro link"
+ln -s "$TEST_DOTFILES/skills/sample-skill" "$TEST_HOME/.kiro/skills/synced/sample-skill" || fail "could not prepare owned synced entry"
+printf 'runtime marker\n' > "$TEST_HOME/.kiro/skills/synced/marker"
+ln -s "$TEST_DOTFILES/agents/security.md" "$TEST_HOME/.kiro/steering/dotfiles-security.md" || fail "could not prepare Kiro steering link"
+printf 'custom steering\n' > "$TEST_HOME/.kiro/steering/notes.md"
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "Kiro cleanup with foreign entries failed"
+run_installer >> "$TEST_CASE_DIR/output" 2>&1 || fail "repeated Kiro cleanup with foreign entries failed"
+for removed in skills/sample-skill skills/synced/sample-skill steering/dotfiles-security.md; do
+  [ ! -e "$TEST_HOME/.kiro/$removed" ] && [ ! -L "$TEST_HOME/.kiro/$removed" ] || fail "installer-owned Kiro link remains: $removed"
+done
+[ "$(cat "$TEST_HOME/.kiro/skills/custom-file")" = 'custom skill' ] || fail "foreign Kiro file changed"
+assert_link_target "$TEST_HOME/.kiro/skills/custom-link" "$TEST_CASE_DIR/elsewhere"
+assert_link_target "$TEST_HOME/.kiro/skills/second-skill" "$TEST_CASE_DIR/elsewhere"
+[ "$(cat "$TEST_HOME/.kiro/skills/synced/marker")" = 'runtime marker' ] || fail "Kiro synced data changed"
+[ "$(cat "$TEST_HOME/.kiro/steering/notes.md")" = 'custom steering' ] || fail "foreign Kiro steering file changed"
+
+# A linked ~/.kiro or skills directory is never traversed.
+setup_fixture kiro-cleanup-linked-directory
+mkdir -p "$TEST_CASE_DIR/external/skills" "$TEST_HOME/.kiro" || fail "could not prepare linked Kiro fixture"
+ln -s "$TEST_DOTFILES/skills/sample-skill" "$TEST_CASE_DIR/external/skills/sample-skill" || fail "could not prepare external link"
+ln -s "$TEST_CASE_DIR/external/skills" "$TEST_HOME/.kiro/skills" || fail "could not link Kiro skills directory"
+run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "linked Kiro directory install failed"
+assert_link_target "$TEST_CASE_DIR/external/skills/sample-skill" "$TEST_DOTFILES/skills/sample-skill"
+assert_link_target "$TEST_HOME/.kiro/skills" "$TEST_CASE_DIR/external/skills"
 
 # Commented settings and echo commands must not suppress active shell setup.
 setup_fixture commented-shell-settings
@@ -229,13 +287,13 @@ run_installer >> "$TEST_CASE_DIR/output" 2>&1 || fail "second commented-settings
 setup_fixture legacy-skill-migration
 mkdir -p "$TEST_DOTFILES/claude/skills/synced" || fail "could not prepare legacy skills"
 printf 'runtime marker\n' > "$TEST_DOTFILES/claude/skills/synced/marker"
-for tool in .claude .copilot .agents .kiro; do
+for tool in .claude .copilot .agents; do
   mkdir -p "$TEST_HOME/$tool" || fail "could not create tool parent"
   ln -s ../dotfiles/claude/skills "$TEST_HOME/$tool/skills" || fail "could not link legacy parent"
 done
 run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "legacy migration failed"
 run_installer >> "$TEST_CASE_DIR/output" 2>&1 || fail "repeated legacy migration failed"
-for tool in .claude .copilot .agents .kiro; do
+for tool in .claude .copilot .agents; do
   [ -d "$TEST_HOME/$tool/skills" ] && [ ! -L "$TEST_HOME/$tool/skills" ] || fail "legacy parent was not replaced"
   assert_link_target "$TEST_HOME/$tool/skills/sample-skill" "$TEST_DOTFILES/skills/sample-skill"
 done

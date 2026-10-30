@@ -172,17 +172,15 @@ prepare_tool_skills_directory() {
 migrate_claude_synced_directory() {
   local legacy_synced="$LEGACY_SKILLS_SOURCE/synced"
   local claude_synced="$HOME/.claude/skills/synced"
-  local tool_synced
+  local agents_synced="$HOME/.agents/skills/synced"
 
-  for tool_synced in "$HOME/.agents/skills/synced" "$HOME/.kiro/skills/synced"; do
-    if symlink_points_to_path "$tool_synced" "$legacy_synced"; then
-      if unlink "$tool_synced"; then
-        echo "🤖 Removed stale Claude synced link $tool_synced."
-      else
-        echo "⚠️  Could not remove stale synced link $tool_synced."
-      fi
+  if symlink_points_to_path "$agents_synced" "$legacy_synced"; then
+    if unlink "$agents_synced"; then
+      echo "🤖 Removed stale Claude synced link $agents_synced."
+    else
+      echo "⚠️  Could not remove stale synced link $agents_synced."
     fi
-  done
+  fi
 
   if [ ! -e "$legacy_synced" ] && [ ! -L "$legacy_synced" ]; then
     return 0
@@ -336,7 +334,60 @@ fi
 
 link_skills_individually "$HOME/.copilot/skills" "GitHub Copilot CLI"
 link_skills_individually "$HOME/.agents/skills" "Codex"
-link_skills_individually "$HOME/.kiro/skills" "Kiro CLI"
+
+# Kiro CLI support was removed. Retire only the links earlier installer runs
+# created under ~/.kiro: skill links (and the stale synced link) that point into
+# this repository, and the steering link to the security policy. Regular files,
+# directories, links to other sources, and ~/.kiro itself are preserved; the
+# directories this removes are deleted only when empty. Delete this function
+# once every machine has run an installer that includes it.
+retire_kiro_links() {
+  local kiro_root="$HOME/.kiro"
+  local skills_dir="$kiro_root/skills"
+  local steering_dir="$kiro_root/steering"
+  local steering_link="$steering_dir/dotfiles-security.md"
+  local entry name
+
+  [ -d "$kiro_root" ] && [ ! -L "$kiro_root" ] || return 0
+
+  if [ -d "$skills_dir" ] && [ ! -L "$skills_dir" ]; then
+    # The synced link is handled as an ordinary entry; look inside synced only
+    # when it is a real directory, never through a link.
+    for entry in "$skills_dir"/* "$skills_dir"/synced/*; do
+      [ -L "$entry" ] || continue
+      name="${entry##*/}"
+      case "$entry" in
+        "$skills_dir"/synced/*) [ ! -L "$skills_dir/synced" ] || continue ;;
+      esac
+      if symlink_points_to_path "$entry" "$SKILLS_SOURCE/$name" || \
+        symlink_points_to_path "$entry" "$LEGACY_SKILLS_SOURCE/$name"; then
+        if unlink "$entry"; then
+          echo "🤖 Removed Kiro CLI link $entry; Kiro CLI is no longer supported."
+        else
+          echo "⚠️  Could not remove Kiro CLI link $entry."
+        fi
+      fi
+    done
+    if [ -d "$skills_dir/synced" ] && [ ! -L "$skills_dir/synced" ]; then
+      rmdir "$skills_dir/synced" 2>/dev/null
+    fi
+    rmdir "$skills_dir" 2>/dev/null
+  fi
+
+  if [ -d "$steering_dir" ] && [ ! -L "$steering_dir" ] && \
+    symlink_points_to_path "$steering_link" "$DOTFILES_DIR/agents/security.md"; then
+    if unlink "$steering_link"; then
+      echo "🤖 Removed Kiro CLI link $steering_link; Kiro CLI is no longer supported."
+    else
+      echo "⚠️  Could not remove Kiro CLI link $steering_link."
+    fi
+    rmdir "$steering_dir" 2>/dev/null
+  fi
+
+  return 0
+}
+
+retire_kiro_links
 
 # Direct native instruction entry points; no edits to existing user instructions.
 install_agent_policy
