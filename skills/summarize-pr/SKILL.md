@@ -1,6 +1,6 @@
 ---
 name: summarize-pr
-description: 'Summarize the current branch''s implementation from local git history/diff into structured sections (Summary, Main Changes, Testing), then update the Azure DevOps PR description. Use when: summarize PR, update PR description, what did this branch do, describe PR changes, fill in PR description.'
+description: 'Summarize the current branch''s implementation from local git history/diff into structured sections (Summary, Main Changes, Automated Tests), then update the Azure DevOps PR description. Use when: summarize PR, update PR description, what did this branch do, describe PR changes, fill in PR description.'
 ---
 
 # Summarize PR
@@ -85,11 +85,11 @@ Also classify the changed files (from the `--stat`/`--name-status` output) into:
 - **Test files** — paths matching common heuristics: `*.spec.*`, `*.test.*`, `*.it.*`, `__tests__/`, `test/`, `tests/`, `e2e/`, `cypress/`, `playwright/`, `*Test.cs`, `*_test.go`, or similar per-language conventions.
 - **Non-test source files** — recognized code extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.cs`, `.java`, `.go`, `.rb`, etc.) that aren't test files, excluding pure config/docs changes (`.md`, `.json`, `.yml`, lockfiles, etc.).
 
-This classification feeds the Testing section below.
+This classification feeds the Automated Tests section below.
 
 ### 6. Draft the summary
 
-Always draft the PR description in Traditional Chinese (繁體中文), regardless of the language used in commit messages or existing PR discussion. Section headings (`## 摘要`, `## 主要變更`, `## 測試`) and prose are in Chinese; code identifiers, file paths, function/variable names, and error strings stay verbatim in their original form.
+Always draft the PR description in Traditional Chinese (繁體中文), regardless of the language used in commit messages or existing PR discussion. Section headings (`## 摘要`, `## 主要變更`, `## 自動化測試`) and prose are in Chinese; code identifiers, file paths, function/variable names, and error strings stay verbatim in their original form.
 
 Organize the PR description into these sections:
 
@@ -105,9 +105,9 @@ Grouped logically by domain/layer (feature/fix/refactor/tests/docs as applicable
 - Change 2
 ```
 
-Keep bullets short and scannable; no filler. Testing-related bullets (test file coverage) belong only in the Testing section below — never repeat them under a Main Changes group.
+Keep bullets short and scannable; no filler. Testing-related bullets (test file coverage) belong only in the Automated Tests section below — never repeat them under a Main Changes group.
 
-#### **Testing** (bullet or paragraph)
+#### **Automated Tests** (bullet or paragraph)
 
 From the test-file classification above: for each test file added or modified in the diff, one bullet with the file name and a one-line description of what it covers, labeled by type inferred from its path/naming convention — UT for spec/jest/karma/vitest-style unit tests, IT for `*.it.*`/integration dirs, E2E for playwright/cypress/e2e dirs. Omit this section entirely if no test files changed. This section only summarizes test coverage — every PR is already gated by CI, so don't include run status, pass counts, or manual test steps.
 
@@ -125,7 +125,7 @@ From the test-file classification above: for each test file added or modified in
 - 輸入 URL 後即時顯示截圖預覽（loading/ready/failed 三態）
 - 確定新增時重用預覽已取得的 fileId/screenshotUrl，不重複發起截圖
 
-## 測試
+## 自動化測試
 - 新增 `website-screenshot.service.spec.ts`（UT）：涵蓋輪詢邏輯與 in-flight Observable 共用
 - 新增 `color-picker.it.ts`（Playwright E2E）：涵蓋 Add Website 彈窗的截圖預覽三態
 ```
@@ -140,7 +140,7 @@ Show the drafted description and ask for confirmation before writing anywhere. O
 
 Ask whether to **replace** or **append to** the existing description — an existing description may carry a template or checklist worth preserving. Default suggestion: if the existing description is non-empty, append the drafted summary under a `## Summary` heading; if empty, just set it directly.
 
-If the existing description contains a block between `<!-- risk-assessment:start -->` and `<!-- risk-assessment:end -->` (written by `create-pr`), keep that block byte-for-byte, including its ticked checklist boxes, as the last thing in the description, even on **replace** or append: the sections this skill drafts go above it. Only those sections are replaced. Do not score risk here; point the user to `create-pr` to refresh a stale score.
+If the existing description contains a block between `<!-- risk-assessment:start -->` and `<!-- risk-assessment:end -->` (written by `create-pr`), keep that block byte-for-byte, including its ticked checklist boxes, as the last thing in the description, even on **replace** or append: the sections this skill drafts go above it. Only those sections are replaced. Do not score risk here and do not rewrite the block, even when it is in an older format; point the user to `create-pr` to refresh a stale score or bring the block to the current format. If the existing description has a `## 測試` heading, the section drafted here uses `## 自動化測試` instead.
 
 ```bash
 DESCRIPTION_BODY=$(jq -n --arg description "$PR_DESCRIPTION" '{description: $description}')

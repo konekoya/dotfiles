@@ -146,7 +146,7 @@ Repository-managed skills:
 | `learn-quiz` | Teach a topic in stages and check understanding with quizzes |
 | `orca-issue-workspace` | Dispatch tasks or GitHub issues to an engineer in an Orca worktree and lead review and delivery |
 | `skill-creator` | Create, update, and evaluate shared agent skills (GitHub Copilot CLI and Codex only) |
-| `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals, current checks, and the PR checklist (unticked items block the merge unless the user waives them), then close out ClickUp (Azure DevOps) and worktrees |
+| `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals, current checks, and the manual test checklist (unticked items block the merge unless the user waives them), then close out ClickUp (Azure DevOps) and worktrees |
 | `squash-git-commits` | Squash feature-branch commits into one relative to the selected PR or repository target branch |
 | `summarize-pr` | Summarize branch changes and update the Azure DevOps PR description, preserving the `create-pr` risk block |
 | `sync-work-notes` | Pull the private work notes, update decisions, reports, and memory from the current session, then commit on a branch and open a PR for review |
@@ -155,7 +155,7 @@ To add a shared skill, create `~/dotfiles/skills/my-skill/SKILL.md` and run `./i
 
 `create-pr` replaces `create-azure-pr`. Run `./install.sh` after updating: it links the new skill and removes only old links pointing to this repository, preserving custom skill files and links. GitHub uses `gh auth login`, repository PR templates, and English by default, with no ClickUp prompts or API calls. Azure DevOps keeps its optional existing-task integration and Traditional Chinese description default; explicit user and repository instructions take precedence.
 
-`create-pr` also scores each PR's review risk (rubric in `skills/create-pr/references/risk-assessment.md`): per-dimension ratings roll up by maximum into a level from `L0` (CI is enough) to `L3` (expert review and rollback plan). The result is a marked block at the end of the PR description, replaced on every update, with a PR checklist of the manual checks and reviews the owner must tick (ticks are kept across updates only for unchanged files, and are never set by the skill). It is advisory only: it never blocks a PR, never changes reviewers, and adds no labels or statuses.
+`create-pr` also scores each PR's review risk (rubric in `skills/create-pr/references/risk-assessment.md`): per-dimension ratings roll up by maximum into an overall rating shown as colour, word and score (🟢 Low 1/3, 🟡 Medium 2/3, 🔴 High 3/3, or ⚪ None 0/3) with the review action for it; a high rating adds a rollback statement. The result is a marked block at the end of the PR description, replaced on every update, with a manual test checklist of the checks and reviews the owner must tick (ticks are kept across updates when the checked behavior and its files are unchanged, even if only the format or wording changed, and are never set by the skill). It is advisory only: it never blocks a PR, never changes reviewers, and adds no labels or statuses.
 
 ## Agent credential safety
 
