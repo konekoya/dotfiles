@@ -1,6 +1,6 @@
 ---
 name: merge-pr
-description: 'Merge one or more ready GitHub or Azure DevOps PRs in a safe order: verify approvals, required checks on the current head, and the PR checklist, check cross-PR conflicts, refresh stale checks, squash-merge, then close out the linked ClickUp task (Azure DevOps) and the local worktree. Use when: merge PR, complete PR, 合併 PR.'
+description: 'Merge one or more ready GitHub or Azure DevOps PRs in a safe order: verify approvals, required checks on the current head, and the manual test checklist, check cross-PR conflicts, refresh stale checks, squash-merge, then close out the linked ClickUp task (Azure DevOps) and the local worktree. Use when: merge PR, complete PR, 合併 PR.'
 ---
 
 # Merge Pull Requests
@@ -26,14 +26,16 @@ Read only the selected reference. If the remote is missing or another provider, 
 
 For each candidate PR, use the reference's readiness query. A PR is ready only when it is open, not a draft, has no merge conflict, has the required approvals, and every required check **succeeded on the PR's current head (or current merge commit)**. A green result from an older commit does not count. Report each PR that is not ready, with the reason, and do not merge it.
 
-### PR checklist
+### Manual test checklist
 
-`create-pr` writes a manual QA checklist into the description, inside the `<!-- risk-assessment:start -->` / `<!-- risk-assessment:end -->` block. Read that block from the same readiness query and report its state for every PR before merging; never skip this because CI and approvals are green.
+`create-pr` writes a manual test checklist into the description, inside the `<!-- risk-assessment:start -->` / `<!-- risk-assessment:end -->` block. Read that block from the same readiness query and report its state for every PR before merging; never skip this because CI and approvals are green.
 
 - **No block**: report `no risk assessment` and continue; the PR predates the checklist or was not made by `create-pr`.
-- **All items ticked** (`- [x]`) or no checklist items: report the overall level and `checklist complete`.
-- **Any item unticked** (`- [ ]`): the PR is not ready. List each unticked item verbatim with the overall level, and do not merge. Only the user may waive this: merge only after they explicitly accept the listed items for that PR, and record the waiver in the final report.
+- **All items ticked** (`- [x]`) or no checklist items: report the overall risk rating exactly as the block writes it (for example `🟡 中（2/3）`) and `checklist complete`.
+- **Any item unticked** (`- [ ]`): the PR is not ready. List each unticked item verbatim, with the dimension it belongs to (the `####` heading above it, or the prefix on the item in an older block) and the overall risk rating, and do not merge. Only the user may waive this: merge only after they explicitly accept the listed items for that PR, and record the waiver in the final report.
 - **Stale score**: when the block's `scored at` commit is not the PR's current head, ticks and items may describe older code. Report it and ask whether to refresh with `create-pr` or merge anyway; do not treat stale ticks as complete.
+
+When the overall rating is high (3/3), also report the block's `回復方式` / `Rollback` line verbatim, so the rollback is visible before the merge; it is a statement, not a box, and does not gate the merge by itself. Read the block the same way whatever format version wrote it: only the markers, the `- [ ]` / `- [x]` boxes and, for naming an item's dimension, its `####` heading or old prefix matter. Never decide readiness from an item's wording.
 
 Never tick or edit a checklist box yourself, not even when the user says they verified it; ask them to tick it, or to say explicitly that the item is waived.
 

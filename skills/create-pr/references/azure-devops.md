@@ -77,13 +77,13 @@ If `CLICKUP_API_TOKEN` isn't set, or the fetch fails, fall back to drafting `<de
 - If no ClickUp bracket is available: insert the type prefix resolved in shared step 5 if missing, or correct it if present but not one of the table in shared step 5.
 - Don't touch parts of the title that are already correct.
 
-**Description.** Follow the exact structure the `summarize-pr` skill uses: default to Traditional Chinese (繁體中文) unless the user or repository instructions require another language. Section headings (`## 摘要`, `## 主要變更`, `## 測試`) and prose are in Chinese; code identifiers, file paths, function/variable names, and error strings stay verbatim in their original form.
+**Description.** Follow the exact structure the `summarize-pr` skill uses: default to Traditional Chinese (繁體中文) unless the user or repository instructions require another language. Section headings (`## 摘要`, `## 主要變更`, `## 自動化測試`) and prose are in Chinese; code identifiers, file paths, function/variable names, and error strings stay verbatim in their original form.
 
 - **`## 摘要`** (1–2 sentences) — core purpose and impact; the reader should understand the goal in one read.
-- **`## 主要變更`** (grouped bullets) — grouped logically by domain/layer (feature/fix/refactor/tests/docs as applicable), from the implementation's perspective, not a verbatim replay of commit messages. Subheadings OK if groups are substantial. Keep bullets short and scannable; testing-related bullets belong only in `## 測試`, never repeated here.
-- **`## 測試`** (bullet or paragraph) — test files added or modified (UT/IT/E2E), one bullet each with what it covers. If no tests added, note that. Don't include run status, pass counts, or manual test steps — every PR is already gated by CI.
+- **`## 主要變更`** (grouped bullets) — grouped logically by domain/layer (feature/fix/refactor/tests/docs as applicable), from the implementation's perspective, not a verbatim replay of commit messages. Subheadings OK if groups are substantial. Keep bullets short and scannable; testing-related bullets belong only in `## 自動化測試`, never repeated here.
+- **`## 自動化測試`** (bullet or paragraph) — test files added or modified (UT/IT/E2E), one bullet each with what it covers. If no tests added, note that. Don't include run status, pass counts, or manual test steps — every PR is already gated by CI. Manual test steps live only in the `### 手動測試清單` checklist inside the risk block. In update mode, rename an existing `## 測試` heading to `## 自動化測試`; keep its content.
 
-The `Closes <ClickUp URL>` line still goes at the very top, above `## 摘要`, separated by a blank line. The marked `## 風險評估` block from [risk-assessment.md](risk-assessment.md) is the last thing in the description, below the final section, with the PR checklist inside it:
+The `Closes <ClickUp URL>` line still goes at the very top, above `## 摘要`, separated by a blank line. The marked `## 風險評估` block from [risk-assessment.md](risk-assessment.md) is the last thing in the description, below the final section, with the manual test checklist inside it:
 
 ```markdown
 Closes <ClickUp URL>
@@ -95,12 +95,12 @@ Closes <ClickUp URL>
 - <change 1>
 - <change 2>
 
-## 測試
+## 自動化測試
 - <test coverage, or note that none was added>
 
 <!-- risk-assessment:start -->
 ## 風險評估
-<overall level, per-dimension findings, 未發現風險 line, and the ### PR 檢查清單 checklist>
+<overall risk line, per-dimension findings, 未發現風險 line, for a high overall risk the 回復方式 line, and the ### 手動測試清單 checklist>
 <!-- risk-assessment:end -->
 ```
 
@@ -268,4 +268,4 @@ Report `updated to "<CHOSEN_STATUS>"` on a `200` response; otherwise `failed` wi
 
 ## Result
 
-Report created/updated, PR ID/title, source → target, `PR_URL`, the overall risk level and unticked checklist count, plus ClickUp backlink and status outcomes: added/updated, already present, skipped (with reason), or failed (with reason).
+Report created/updated, PR ID/title, source → target, `PR_URL`, the overall risk rating (for example `🟡 中（2/3）`) and the unticked checklist count, plus ClickUp backlink and status outcomes: added/updated, already present, skipped (with reason), or failed (with reason).

@@ -33,10 +33,10 @@ gh repo view "$GH_REPO" --json defaultBranchRef --jq '.defaultBranchRef.name'
 
 - Use the repository's title convention; otherwise draft `<type>: <description>` using the shared Conventional Commit type. Preserve an explicit title or existing PR title unless it violates repository requirements. Do not extract a ClickUp ID from a branch or add a task bracket.
 - Inspect repository PR templates (`.github/PULL_REQUEST_TEMPLATE.md`, `.github/pull_request_template.md`, root or `docs/` variants, and template directories) and contributor instructions before drafting. Preserve the selected template's structure; ask when multiple templates apply and no choice is evident.
-- Follow the user/repository language; otherwise use English. With no template, use a concise `## Summary` and `## Testing`, describing the purpose, main changes, and checks actually run. Include material validation gaps. Include review history only when relevant and supported by evidence.
+- Follow the user/repository language; otherwise use English. With no template, use a concise `## Summary` and `## Automated tests`, describing the purpose, main changes, and checks actually run. Include material validation gaps. Include review history only when relevant and supported by evidence.
 - No ClickUp field, title lookup, `Closes <ClickUp URL>` line, task creation, backlink, or status offer. Link a GitHub issue when explicitly supplied/requested; use a closing keyword only when the change resolves that issue.
-- Add the marked `## Risk Assessment` block from [risk-assessment.md](risk-assessment.md), including its PR checklist, as the last thing in the body; with a PR template, append it after the template's last section and leave the template itself untouched.
-- In update mode, preserve useful existing body content, issue links, and template sections. Refresh stale facts from the diff rather than blindly replacing the body.
+- Add the marked `## Risk Assessment` block from [risk-assessment.md](risk-assessment.md), including its manual test checklist, as the last thing in the body; with a PR template, append it after the template's last section and leave the template itself untouched.
+- In update mode, preserve useful existing body content, issue links, and template sections; rename an existing default `## Testing` heading to `## Automated tests`, but never rename a heading that comes from a repository template. Refresh stale facts from the diff rather than blindly replacing the body.
 
 ## Publish
 
