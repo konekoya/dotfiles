@@ -137,7 +137,7 @@ Repository-managed skills:
 |-------|---------|
 | `address-pr-review` | Fetch Copilot review comments from an Azure DevOps PR, discuss fixes, then apply approved fixes and reply to the threads |
 | `babysit-pr-checks` | Resolve conflicts and PR feedback, run checks, push, and monitor/fix CI until the Azure DevOps PR is green |
-| `create-pr` | Detect GitHub or Azure DevOps from the selected remote, run repository checks, push, and create or update a PR using `gh` or the shared Azure DevOps REST helper; optional ClickUp linking/status updates apply only to Azure DevOps |
+| `create-pr` | Detect GitHub or Azure DevOps from the selected remote, run repository checks, push, and create or update a PR using `gh` or the shared Azure DevOps REST helper; optional ClickUp linking/status updates apply only to Azure DevOps; scores review risk (security, UI regression, data, API, and more) into a marked PR description block |
 | `create-clickup-task` | Create a ClickUp task directly or from the current branch/PR with formatted lists and optional reviewer verification steps, choose its type and placement, and optionally link the PR without losing formatting |
 | `create-git-commit` | Draft a Conventional Commit message from the changes and commit after confirmation |
 | `fix-npm-audit` | Triage `npm audit` findings by severity, ask before applying fixes, then commit |
@@ -148,12 +148,14 @@ Repository-managed skills:
 | `skill-creator` | Create, update, and evaluate shared agent skills (GitHub Copilot CLI, Codex, and Kiro CLI only) |
 | `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals and current checks, then close out ClickUp (Azure DevOps) and worktrees |
 | `squash-git-commits` | Squash feature-branch commits into one relative to the selected PR or repository target branch |
-| `summarize-pr` | Summarize branch changes and update the Azure DevOps PR description |
+| `summarize-pr` | Summarize branch changes and update the Azure DevOps PR description, preserving the `create-pr` risk block |
 | `sync-work-notes` | Pull the private work notes, update decisions, reports, and memory from the current session, then commit on a branch and open a PR for review |
 
 To add a shared skill, create `~/dotfiles/skills/my-skill/SKILL.md` and run `./install.sh`. The installer creates all four per-skill links; no manual links are needed.
 
 `create-pr` replaces `create-azure-pr`. Run `./install.sh` after updating: it links the new skill and removes only old links pointing to this repository, preserving custom skill files and links. GitHub uses `gh auth login`, repository PR templates, and English by default, with no ClickUp prompts or API calls. Azure DevOps keeps its optional existing-task integration and Traditional Chinese description default; explicit user and repository instructions take precedence.
+
+`create-pr` also scores each PR's review risk (rubric in `skills/create-pr/references/risk-assessment.md`): per-dimension ratings roll up by maximum into a level from `L0` (CI is enough) to `L3` (expert review and rollback plan). The result is a marked block in the PR description, replaced on every update. It is advisory only: it never blocks a PR, never changes reviewers, and adds no labels or statuses.
 
 ## Agent credential safety
 

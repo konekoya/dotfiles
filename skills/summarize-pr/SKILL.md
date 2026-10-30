@@ -152,6 +152,8 @@ Show the drafted description and ask for confirmation before writing anywhere. O
 
 Ask whether to **replace** or **append to** the existing description — an existing description may carry a template or checklist worth preserving. Default suggestion: if the existing description is non-empty, append the drafted summary under a `## Summary` heading; if empty, just set it directly.
 
+If the existing description contains a block between `<!-- risk-assessment:start -->` and `<!-- risk-assessment:end -->` (written by `create-pr`), keep that block byte-for-byte in the same position, even on **replace**. Only the sections this skill drafts are replaced. Do not score risk here; point the user to `create-pr` to refresh a stale score.
+
 ```bash
 DESCRIPTION_BODY=$(jq -n --arg description "$PR_DESCRIPTION" '{description: $description}')
 ado-rest PATCH "/_apis/git/repositories/${REPO}/pullrequests/${PR_ID}?api-version=7.1" "$DESCRIPTION_BODY"
