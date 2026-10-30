@@ -26,11 +26,13 @@ Rate each dimension `0` (not touched), `1` Low, `2` Medium, or `3` High. A trigg
 
 Use the max, not an average: one severe risk must not be diluted by many quiet dimensions.
 
+**Test-only and docs-only changes score 0.** A change that touches only test files and documentation rates every dimension 0 and the overall rating ⚪ none (L0); the test gap modifier does not apply to it. Three kinds of change are not test-only even when they live in or beside tests; score them by their own dimensions: CI pipeline changes (Ops and rollback), build or test-runner configuration (Ops and rollback), and test hooks placed in production source files, such as a test-only export, flag, or endpoint (API and contract, or the dimension the hook actually touches).
+
 `L0`–`L3` are internal names for the rules below; they never appear in the description. Output shows each level as a rating with its review action:
 
 | Level | Rating shown (zh / en) | Meaning | Review action (zh / en) |
 | --- | --- | --- | --- |
-| L0 | ⚪ 無（0/3） / ⚪ None (0/3) | Docs, comments, or mechanical changes | CI 通過即可，略讀摘要 / CI is enough; skim the summary |
+| L0 | ⚪ 無（0/3） / ⚪ None (0/3) | Docs, tests only, comments, or mechanical changes | CI 通過即可，略讀摘要 / CI is enough; skim the summary |
 | L1 | 🟢 低（1/3） / 🟢 Low (1/3) | Small, low-impact change | 一位 reviewer 一般審查 / standard review by one reviewer |
 | L2 | 🟡 中（2/3） / 🟡 Medium (2/3) | Meaningful risk in named areas | 重點審查列出的檔案，並實際操作列出的行為 / focused review of the listed files; exercise the listed behavior by hand |
 | L3 | 🔴 高（3/3） / 🔴 High (3/3) | High-impact or hard to revert | 需熟悉該領域的人審查並實際操作，合併前確認回復方式 / domain-expert review and a hands-on walkthrough; confirm the rollback before merging |
@@ -39,7 +41,7 @@ Use the max, not an average: one severe risk must not be diluted by many quiet d
 
 Show every rating as colour, word and score out of 3: 🔴 高（3/3）, 🟡 中（2/3）, 🟢 低（1/3） in Chinese and 🔴 High (3/3), 🟡 Medium (2/3), 🟢 Low (1/3) in English. A dimension rated 0 is not listed; ⚪ 無（0/3） / ⚪ None (0/3) appears only on the overall line.
 
-Include only dimensions rated 1 or higher, highest first, one line each: `- <dimension> <rating>：<evidence> <why>` (English: `- <dimension> <rating>: …`). A finding states the evidence (`path:line`) and why it is risky, not what to do about it: the actions live only in the checklist below, so nothing is listed twice. Name the modifiers applied. Collapse the rest into one line. Record the scored commit: `git rev-parse --short HEAD`. When the head commit moves after scoring (a new push in update mode), score again; never carry a stale level over.
+Include only dimensions rated 1 or higher, highest first, one line each: `- <dimension> <rating>：<evidence> <why>` (English: `- <dimension> <rating>: …`). A finding states the evidence (`path:line`) and why it is risky, not what to do about it: the actions live only in the checklist below, so nothing is listed twice. Name the modifiers applied. Collapse the rest into one closing line that lists every dimension rated 0, each by name, with none left out and none that already has a finding above; when every dimension is 0, the line lists all eight. Record the scored commit: `git rev-parse --short HEAD`. Update mode compares the head with the previous `scored at` commit; see Score stability below.
 
 The overall line carries the review action for the level from the table above, then the scored commit: ``**整體風險：🔴 高（3/3）**：<審查方式> · scored at `abc1234` `` (English: ``**Overall risk: 🔴 High (3/3)**: <review action> · scored at `abc1234` ``).
 
@@ -58,9 +60,18 @@ Group the checklist by dimension: one `####` heading per dimension that has item
 
 Each item is one check with an observable pass condition, short enough to read on one line: about 40 Chinese characters or 80 English characters. If a check needs more, split it into two items. Do not name files, paths, or identifiers in an item; the owner tests behavior, and the paths already sit in the finding above. A behavior change that is deliberate still gets an item to confirm the owner accepts it. Omit the section when no item qualifies; never emit an empty heading.
 
-Never tick a box yourself. Tick one only when the user says they did that check. In update mode, regenerate the checklist from the new score and carry ticks over by meaning, not by text: an old item and a new item are the same when they have the same dimension and check the same behavior. Take an item's dimension from the `####` heading it sits under; in a block from before the grouped format, take it from the dimension prefix on the item. The English and Chinese names of a dimension (including the English prefixes older Chinese blocks used) are the same dimension. Keep the box ticked when the behavior is the same and the files in its finding's evidence are unchanged since the previous `scored at` commit (`git diff <old>..HEAD -- <paths>` is empty); read that evidence from the old finding's `path:line`. Reset it to unticked only when the behavior or those files changed, because the code it vouched for has moved. A change of wording, grouping or format alone never resets a box.
+Never tick a box yourself. Tick one only when the user says they did that check. In update mode, regenerate the checklist from the new score and carry ticks over by meaning, not by text: an old item and a new item are the same when they have the same dimension and check the same behavior. Take an item's dimension from the `####` heading it sits under; in a block from before the grouped format, take it from the dimension prefix on the item. The English and Chinese names of a dimension (including the English prefixes older Chinese blocks used) are the same dimension. Keep the box ticked when the behavior is the same and the files in its finding's evidence are unchanged since the previous `scored at` commit (`git diff <old>..HEAD -- <paths>` is empty); read that evidence from the old finding's `path:line`. Reset it to unticked only when the behavior or those files changed, because the code it vouched for has moved. A change of wording, grouping or format alone never resets a box, and when an old item is split into several, every part inherits its tick.
 
-Language follows the description. Azure DevOps default is Traditional Chinese with the `## 風險評估` and `### 手動測試清單` headings; GitHub follows the user, repository, or English with `## Risk Assessment` and `### Manual test checklist`. Paths and identifiers stay verbatim. In Chinese output use the Chinese dimension names everywhere: in findings, in checklist prefixes, and in the closing no-risk line. The names are Security 資安, UI regression UI 迴歸, Data and migration 資料, API and contract API, Blast radius 影響範圍, Business logic 業務邏輯, Performance 效能, Ops and rollback 維運. Use `未發現風險：資安、資料、API、效能、維運。` rather than an English `No risk found:` line.
+### Score stability in update mode
+
+Resolve the previous `scored at` commit (`git rev-parse --verify <old>^{commit}`) and compare it with `HEAD`. If it cannot be resolved (for example after a rebase), treat the head as moved.
+
+- **Head equals the previous `scored at` commit** (no code change): keep every dimension rating and the overall rating exactly as scored, and do not remove any checklist item. Only wording, format or grouping may change. An item may be split into several; every resulting part inherits the tick of the original. Do not re-judge the diff.
+- **Head moved**: score the diff again; never carry a stale rating over. Lowering a dimension below its previous rating is allowed, but when that drops an item that was ticked, the preview must give a one-line reason for it (which dimension, and why the lower rating is correct) before the update is approved.
+
+### Language and markers
+
+Language follows the description. Azure DevOps default is Traditional Chinese with the `## 風險評估` and `### 手動測試清單` headings; GitHub follows the user, repository, or English with `## Risk Assessment` and `### Manual test checklist`. Paths and identifiers stay verbatim. In Chinese output use the Chinese dimension names everywhere: in findings, in checklist prefixes, and in the closing no-risk line. The names are Security 資安, UI regression UI 迴歸, Data and migration 資料, API and contract API, Blast radius 影響範圍, Business logic 業務邏輯, Performance 效能, Ops and rollback 維運. Write the closing line as `未發現風險：` followed by the Chinese names of all dimensions rated 0 (for example `未發現風險：資安、UI 迴歸、資料、API、影響範圍、業務邏輯、效能、維運。` when every dimension is 0), rather than an English `No risk found:` line.
 
 Wrap the section in markers so later runs and other skills can find and replace it without touching the rest of the body. The markers never change:
 
