@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: 'Push the current branch and create or update a GitHub or Azure DevOps PR. Detect the provider from the selected Git remote, run repository quality checks, and score review risk, and publish through gh or the shared Azure DevOps REST helper. Use when: create PR, open pull request, update PR, 建 PR, 發 PR.'
+description: 'Push the current branch and create or update a GitHub or Azure DevOps PR. Detect the provider from the selected Git remote, run repository quality checks, and score review risk with a PR checklist, and publish through gh or the shared Azure DevOps REST helper. Use when: create PR, open pull request, update PR, 建 PR, 發 PR.'
 ---
 
 # Create or Update a Pull Request
@@ -127,4 +127,4 @@ Create or update via the selected reference, then fetch the resulting PR to veri
 
 ### 7. Report the result
 
-For GitHub, report created/updated, PR number/title, source → target, and the returned URL. For Azure DevOps, first follow its optional ClickUp backlink/status flow, then include those outcomes in the result. Include the overall risk level. Report partial failures accurately without undoing a successful PR operation. Mention any stash or local fixes committed during the workflow.
+For GitHub, report created/updated, PR number/title, source → target, and the returned URL. For Azure DevOps, first follow its optional ClickUp backlink/status flow, then include those outcomes in the result. Include the overall risk level and the number of unticked checklist items, which are the owner's to complete. Report partial failures accurately without undoing a successful PR operation. Mention any stash or local fixes committed during the workflow.

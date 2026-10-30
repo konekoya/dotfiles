@@ -6,13 +6,13 @@ Use the GitHub CLI (`gh`); Azure tooling and ClickUp are unnecessary. Check `gh 
 
 ```bash
 gh pr view "$PR_ID" --repo "$GH_REPO" \
-  --json number,title,state,isDraft,baseRefName,headRefName,headRefOid,isCrossRepository,mergeable,mergeStateStatus,reviewDecision
+  --json number,title,state,isDraft,baseRefName,headRefName,headRefOid,isCrossRepository,mergeable,mergeStateStatus,reviewDecision,body
 gh pr checks "$PR_ID" --repo "$GH_REPO" --required --json name,state,bucket
 ```
 
 `gh pr checks` exits non-zero with `no checks reported` when the branch has no checks; treat that as no required checks, not as a failure.
 
-Ready means `state` `OPEN`, not draft, `mergeable` `MERGEABLE`, `reviewDecision` `APPROVED` (or empty when no review is required), and every required check in bucket `pass`. Read `mergeStateStatus`:
+Read the checklist state from `body` as described in the shared procedure. Ready means `state` `OPEN`, not draft, `mergeable` `MERGEABLE`, `reviewDecision` `APPROVED` (or empty when no review is required), and every required check in bucket `pass`. Read `mergeStateStatus`:
 
 - `CLEAN` or `HAS_HOOKS`: mergeable now.
 - `BEHIND`: branch protection requires the branch to be up to date. With the user's approval, run `gh pr update-branch "$PR_ID" --repo "$GH_REPO"`, wait for the required checks on the new head, then re-check.
@@ -23,7 +23,7 @@ Ready means `state` `OPEN`, not draft, `mergeable` `MERGEABLE`, `reviewDecision`
 
 ## Merge
 
-Use the PR title as the subject and its body as the merge body, and pin the verified head:
+Use the PR title as the subject and its body, minus the `risk-assessment` block, as the merge body (write it to `MERGE_BODY_FILE`), and pin the verified head:
 
 ```bash
 gh pr merge "$PR_ID" --repo "$GH_REPO" --squash \

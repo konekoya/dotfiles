@@ -11,15 +11,16 @@ ado-rest GET "/_apis/build/builds?branchName=refs/pull/${PR_ID}/merge&\$top=4&qu
   | jq -r '.value[] | "\(.id) \(.definition.name) \(.status) \(.result // "-") \(.sourceVersion[0:8])"'
 ```
 
-Ready means `status` `active`, not draft, `mergeStatus` `succeeded`, required approvals (vote 10 or 5), and the newest build of every pipeline succeeded with `sourceVersion` equal to the PR's `lastMergeCommit`.
+The checklist is read from `description` in `$PR_JSON_FILE` as described in the shared procedure. Ready means `status` `active`, not draft, `mergeStatus` `succeeded`, required approvals (vote 10 or 5), and the newest build of every pipeline succeeded with `sourceVersion` equal to the PR's `lastMergeCommit`.
 
 ## Merge
 
 ```bash
 BODY=$(python3 -I -c '
-import json, sys
+import json, re, sys
 d = json.loads(open(sys.argv[1]).read(), strict=False)
-msg = d["title"] + "\n\n" + (d.get("description") or "").strip()
+desc = re.sub(r"<!-- risk-assessment:start -->.*?<!-- risk-assessment:end -->", "", d.get("description") or "", flags=re.S)
+msg = d["title"] + "\n\n" + desc.strip()
 print(json.dumps({"status": "completed",
   "lastMergeSourceCommit": {"commitId": d["lastMergeSourceCommit"]["commitId"]},
   "completionOptions": {"mergeStrategy": "squash", "deleteSourceBranch": True,
