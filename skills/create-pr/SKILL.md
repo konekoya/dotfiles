@@ -107,7 +107,7 @@ Check the `git log` output from step 4:
 
 Follow the selected reference's title and description conventions. Preserve explicit user wording and use existing PR details as defaults in update mode. Repository instructions and templates take precedence over provider defaults. Do not invoke `summarize-pr` for GitHub; that skill remains Azure-specific.
 
-**Risk assessment.** Read [risk-assessment.md](references/risk-assessment.md) and score the diff from step 4 with it. Put the marked `Risk Assessment` block into the drafted description at the placement the selected provider reference and that file describe. This applies to both providers and to update mode, where the block is regenerated for the current `HEAD`. The score is advisory and never blocks publishing.
+**Risk assessment.** Read [risk-assessment.md](references/risk-assessment.md) and score the diff from step 4 with it. Put the marked `Risk Assessment` block into the drafted description at the placement the selected provider reference and that file describe. The block is always the last thing in the description, never the first: in update mode, regenerate it for the current `HEAD` and move it to the end even when the existing PR carries it at the top. This applies to both providers. The score is advisory and never blocks publishing.
 
 Collect any missing target, title, description, draft preference, and reviewers with `ask_user`. Default new PRs to ready for review with no reviewers; preserve existing draft state and reviewers unless the user requests a change. Azure DevOps alone includes the optional ClickUp URL. If the target changes, repeat step 4 and redraft against the corrected target.
 

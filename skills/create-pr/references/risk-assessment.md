@@ -37,19 +37,19 @@ Use the max, not an average: one severe risk must not be diluted by many quiet d
 
 Include only dimensions rated 1 or higher, highest first. Each finding states the evidence (`path:line`) and why it is risky, not what to do about it: the actions live only in the checklist below, so nothing is listed twice. Name the modifiers applied. Collapse the rest into one line. Record the scored commit: `git rev-parse --short HEAD`. When the head commit moves after scoring (a new push in update mode), score again; never carry a stale level over.
 
-An L3 PR may suggest a reviewer in the preview, but never add or change reviewers automatically. The block is the only output: do not add labels, statuses, or comments.
+An L3 PR may suggest a reviewer in the preview, but never add or change reviewers automatically. Before showing the preview, check that nothing follows `<!-- risk-assessment:end -->` and that the block does not appear anywhere else in the description. The block is the only output: do not add labels, statuses, or comments.
 
 ### Checklist
 
 Add a checklist for the PR owner, who does the manual QA and review. The PR counts as checked only when every box is ticked. Build it from:
 
-- Every dimension rated 2 or 3: one item per distinct behavior or file to verify, so each can be ticked on its own. Rating 1 gets no item.
+- Every dimension rated 2 or 3: one item per distinct behavior to verify, so each can be ticked on its own. Rating 1 gets no item.
 - Each applied modifier that asks for work: test gap becomes "add a test, or confirm why none is needed".
 - L3: an item to confirm the rollback plan.
 
-Each item is one concrete action with an observable pass condition, prefixed with its dimension and naming the file: `- [ ] UI regression: <what to do and what to expect> (`path`)`. A behavior change that is deliberate still gets an item to confirm the owner accepts it. Omit the section when no item qualifies; never emit an empty heading.
+Each item is one concrete action with an observable pass condition, prefixed with its dimension: `- [ ] UI regression: <what to do and what to expect>`. Do not name files, paths, or identifiers in an item; the owner tests behavior, and the paths already sit in the finding above. A behavior change that is deliberate still gets an item to confirm the owner accepts it. Omit the section when no item qualifies; never emit an empty heading.
 
-Never tick a box yourself. Tick one only when the user says they did that check. In update mode, regenerate the checklist from the new score. Keep a box ticked only when the item text is unchanged and the files it names are unchanged since the previous `scored at` commit (`git diff <old>..HEAD -- <paths>` is empty); otherwise reset it to unticked, because the code it vouched for has moved.
+Never tick a box yourself. Tick one only when the user says they did that check. In update mode, regenerate the checklist from the new score. Keep a box ticked only when the item text is unchanged and the files of its finding's evidence are unchanged since the previous `scored at` commit (`git diff <old>..HEAD -- <paths>` is empty); otherwise reset it to unticked, because the code it vouched for has moved.
 
 ### Language and markers
 
@@ -69,8 +69,8 @@ Wrap the section in markers so later runs and other skills can find and replace 
 No risk found: data, API, blast radius, business logic, performance, ops.
 
 ### PR Checklist
-- [ ] Security: confirm a user without the role is still denied (`auth/guard.ts:40-80`)
-- [ ] UI regression: open the main screens and compare `Button` against the previous build (`Button.scss`)
+- [ ] Security: confirm a user without the role is still denied
+- [ ] UI regression: open the main screens and compare the buttons against the previous build
 - [ ] Test gap: add a test for the guard, or note why none is needed
 <!-- risk-assessment:end -->
 ```
@@ -88,9 +88,9 @@ The Chinese form of the same block:
 未發現風險：資料、API、影響範圍、業務邏輯、效能、維運。
 
 ### PR 檢查清單
-- [ ] Security：確認沒有該角色的使用者仍被拒絕（`auth/guard.ts:40-80`）
-- [ ] UI regression：開啟主要畫面，與前一版比對 `Button`（`Button.scss`）
+- [ ] Security：確認沒有該角色的使用者仍被拒絕
+- [ ] UI regression：開啟主要畫面，與前一版比對按鈕外觀
 <!-- risk-assessment:end -->
 ```
 
-Placement: always the very end of the description, below the last section, separated by a blank line. For Azure DevOps, below `## 測試` (or `## Code Review` when present). For GitHub, below the last body section; when a PR template applies, append the block after the template's last section and leave the template untouched. In update mode, regenerate the block and place it at the end, removing the old block wherever it was (older PRs carry it at the top).
+Placement: always the very end of the description, below the last section, separated by a blank line. For Azure DevOps, below `## 測試`. For GitHub, below the last body section; when a PR template applies, append the block after the template's last section and leave the template untouched. In update mode, regenerate the block and place it at the end, removing the old block wherever it was (older PRs carry it at the top).
