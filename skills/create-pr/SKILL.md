@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: 'Push the current branch and create or update a GitHub or Azure DevOps PR. Detect the provider from the selected Git remote, run repository quality checks, and publish through gh or the shared Azure DevOps REST helper. Use when: create PR, open pull request, update PR, 建 PR, 發 PR.'
+description: 'Push the current branch and create or update a GitHub or Azure DevOps PR. Detect the provider from the selected Git remote, run repository quality checks, and score review risk, and publish through gh or the shared Azure DevOps REST helper. Use when: create PR, open pull request, update PR, 建 PR, 發 PR.'
 ---
 
 # Create or Update a Pull Request
@@ -107,6 +107,8 @@ Check the `git log` output from step 4:
 
 Follow the selected reference's title and description conventions. Preserve explicit user wording and use existing PR details as defaults in update mode. Repository instructions and templates take precedence over provider defaults. Do not invoke `summarize-pr` for GitHub; that skill remains Azure-specific.
 
+**Risk assessment.** Read [risk-assessment.md](references/risk-assessment.md) and score the diff from step 4 with it. Put the marked `Risk Assessment` block into the drafted description at the placement the selected provider reference and that file describe. This applies to both providers and to update mode, where the block is regenerated for the current `HEAD`. The score is advisory and never blocks publishing.
+
 Collect any missing target, title, description, draft preference, and reviewers with `ask_user`. Default new PRs to ready for review with no reviewers; preserve existing draft state and reviewers unless the user requests a change. Azure DevOps alone includes the optional ClickUp URL. If the target changes, repeat step 4 and redraft against the corrected target.
 
 ### 6. Preview and publish
@@ -125,4 +127,4 @@ Create or update via the selected reference, then fetch the resulting PR to veri
 
 ### 7. Report the result
 
-For GitHub, report created/updated, PR number/title, source → target, and the returned URL. For Azure DevOps, first follow its optional ClickUp backlink/status flow, then include those outcomes in the result. Report partial failures accurately without undoing a successful PR operation. Mention any stash or local fixes committed during the workflow.
+For GitHub, report created/updated, PR number/title, source → target, and the returned URL. For Azure DevOps, first follow its optional ClickUp backlink/status flow, then include those outcomes in the result. Include the overall risk level. Report partial failures accurately without undoing a successful PR operation. Mention any stash or local fixes committed during the workflow.

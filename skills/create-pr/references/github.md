@@ -35,6 +35,7 @@ gh repo view "$GH_REPO" --json defaultBranchRef --jq '.defaultBranchRef.name'
 - Inspect repository PR templates (`.github/PULL_REQUEST_TEMPLATE.md`, `.github/pull_request_template.md`, root or `docs/` variants, and template directories) and contributor instructions before drafting. Preserve the selected template's structure; ask when multiple templates apply and no choice is evident.
 - Follow the user/repository language; otherwise use English. With no template, use a concise `## Summary` and `## Testing`, describing the purpose, main changes, and checks actually run. Include material validation gaps. Include review history only when relevant and supported by evidence.
 - No ClickUp field, title lookup, `Closes <ClickUp URL>` line, task creation, backlink, or status offer. Link a GitHub issue when explicitly supplied/requested; use a closing keyword only when the change resolves that issue.
+- Add the marked `## Risk Assessment` block from [risk-assessment.md](risk-assessment.md) above the first body section; with a PR template, insert it above the template's first heading and leave the template itself untouched.
 - In update mode, preserve useful existing body content, issue links, and template sections. Refresh stale facts from the diff rather than blindly replacing the body.
 
 ## Publish

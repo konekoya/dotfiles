@@ -84,10 +84,15 @@ If `CLICKUP_API_TOKEN` isn't set, or the fetch fails, fall back to drafting `<de
 - **`## 測試`** (bullet or paragraph) — test files added or modified (UT/IT/E2E), one bullet each with what it covers. If no tests added, note that. Don't include run status, pass counts, or manual test steps — every PR is already gated by CI.
 - **`## Code Review`** (bullet or paragraph) — review rounds and key feedback addressed, conflicts resolved, pull from PR comment threads if available (cross-reference `pr-comments`/`address-pr-review`), not just local git. Only include this section if the branch has actually been through review — for a brand-new PR being created here, that will almost always mean omitting it entirely, so don't emit an empty heading. (In update mode, check whether the existing PR has review history before deciding.)
 
-The `Closes <ClickUp URL>` line still goes at the very top, above `## 摘要`, separated by a blank line:
+The `Closes <ClickUp URL>` line still goes at the very top, above the risk block and `## 摘要`, separated by a blank line. The marked `## 風險評估` block from [risk-assessment.md](risk-assessment.md) sits between them:
 
 ```markdown
 Closes <ClickUp URL>
+
+<!-- risk-assessment:start -->
+## 風險評估
+<overall level, per-dimension findings, and the checks a human should do>
+<!-- risk-assessment:end -->
 
 ## 摘要
 <1–2 sentence summary>
@@ -264,4 +269,4 @@ Report `updated to "<CHOSEN_STATUS>"` on a `200` response; otherwise `failed` wi
 
 ## Result
 
-Report created/updated, PR ID/title, source → target, and `PR_URL`, plus ClickUp backlink and status outcomes: added/updated, already present, skipped (with reason), or failed (with reason).
+Report created/updated, PR ID/title, source → target, `PR_URL`, the overall risk level, plus ClickUp backlink and status outcomes: added/updated, already present, skipped (with reason), or failed (with reason).
