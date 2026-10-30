@@ -66,8 +66,8 @@ for index in "${!agent_policy_labels[@]}"; do
   cmp -s "$target" "$AGENT_POLICY_SOURCE" || fail "native entry point did not contain full policy"
 done
 run_policy
-[ "$(grep -c 'security policy already linked' "$TEST_CASE/install-output")" -eq 4 ] || fail "repeated install not idempotent"
-[ "$(grep -c '^PASS:' "$TEST_CASE/doctor-output")" -eq 4 ] || fail "working links not recognized"
+[ "$(grep -c 'security policy already linked' "$TEST_CASE/install-output")" -eq 3 ] || fail "repeated install not idempotent"
+[ "$(grep -c '^PASS:' "$TEST_CASE/doctor-output")" -eq 3 ] || fail "working links not recognized"
 
 # Each native entry point must remain live when the canonical policy changes.
 printf '\nSynthetic policy update.\n' >> "$AGENT_POLICY_SOURCE"
@@ -101,8 +101,8 @@ for kind in file directory symlink dangling; do
       dangling) [ "$(readlink "$target")" = "$TEST_CASE/missing.md" ] || fail "dangling symlink changed" ;;
     esac
   done
-  [ "$(grep -c 'preserving existing global instruction path' "$TEST_CASE/install-output")" -eq 4 ] || fail "conflicts not reported"
-  [ "$(grep -c 'coverage is unverified' "$TEST_CASE/doctor-output")" -eq 4 ] || fail "custom paths incorrectly certified"
+  [ "$(grep -c 'preserving existing global instruction path' "$TEST_CASE/install-output")" -eq 3 ] || fail "conflicts not reported"
+  [ "$(grep -c 'coverage is unverified' "$TEST_CASE/doctor-output")" -eq 3 ] || fail "custom paths incorrectly certified"
 done
 
 # Parent links/files must not redirect policy writes into user-managed directories.
@@ -118,13 +118,12 @@ for kind in symlink dangling file; do
   done
   run_policy
   [ -z "$(ls -A "$TEST_CASE/external")" ] || fail "policy installer followed a parent link"
-  [ "$(grep -c 'preserving linked/conflicting directory' "$TEST_CASE/install-output")" -eq 4 ] || fail "unsafe parents not reported"
+  [ "$(grep -c 'preserving linked/conflicting directory' "$TEST_CASE/install-output")" -eq 3 ] || fail "unsafe parents not reported"
 done
 
 setup_fixture nested-parent
-mkdir -p "$HOME/.claude" "$HOME/.kiro" "$TEST_CASE/external"
+mkdir -p "$HOME/.claude" "$TEST_CASE/external"
 ln -s "$TEST_CASE/external" "$HOME/.claude/rules"
-ln -s "$TEST_CASE/external" "$HOME/.kiro/steering"
 run_policy
 [ -z "$(ls -A "$TEST_CASE/external")" ] || fail "nested parent link followed"
 
@@ -183,7 +182,7 @@ grep -Fq 'Codex CLI: security policy already linked' "$TEST_CASE/install-output"
 
 setup_fixture missing
 check_agent_policy > "$TEST_CASE/doctor-output" 2>&1 || fail "optional missing policy caused failure"
-[ "$(grep -c 'optional global security policy is missing' "$TEST_CASE/doctor-output")" -eq 4 ] || fail "missing policy not warned"
+[ "$(grep -c 'optional global security policy is missing' "$TEST_CASE/doctor-output")" -eq 3 ] || fail "missing policy not warned"
 [ ! -e "$HOME/.codex" ] || fail "diagnostics created directories"
 rm "$AGENT_POLICY_SOURCE"
 install_agent_policy > "$TEST_CASE/install-output" 2>&1 || fail "missing canonical source caused failure"

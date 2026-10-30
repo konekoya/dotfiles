@@ -1,6 +1,6 @@
 ---
 name: orca-issue-workspace
-description: 'Turn a decided feature or task into a GitHub issue and Orca workspace, or dispatch any task to an engineer agent in a worktree; lead the plan -> implement -> review -> push loop, including continuing an existing PR branch. Use when: open an Orca workspace for an issue, assign an agent to an issue, create issue and workspace, delegate to an Orca session, delegate or dispatch a task to an agent, assign work to Codex, Claude, or Kiro, continue a PR branch in a worktree, 開 issue 開 workspace, 指派 agent.'
+description: 'Turn a decided feature or task into a GitHub issue and Orca workspace, or dispatch any task to an engineer agent in a worktree; lead the plan -> implement -> review -> push loop, including continuing an existing PR branch. Use when: open an Orca workspace for an issue, assign an agent to an issue, create issue and workspace, delegate to an Orca session, delegate or dispatch a task to an agent, assign work to Codex or Claude, continue a PR branch in a worktree, 開 issue 開 workspace, 指派 agent.'
 ---
 
 # Task -> Orca workspace -> engineer agent

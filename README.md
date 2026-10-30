@@ -57,7 +57,7 @@ To also install missing command-line tools with Homebrew (see [Dependencies](#de
 - Creates symlinks for `~/.gitconfig` and `~/.gitignore_global` when they are missing. Correct links are left in place; existing files and unrelated or broken symlinks are preserved with a warning.
 - Creates `~/.gitconfig.local` from `git/.gitconfig.local.example` if it doesn't exist. It holds your Git `user.name` and `user.email`, lives outside the repository, and is never overwritten
 - Creates `~/.gitconfig.work` from `git/.gitconfig.work.example` if it doesn't exist. It is optional and unused until you enable the Azure DevOps `includeIf` rules (see Git Config)
-- Creates real skills directories and links each repository-managed skill separately for Claude Code, GitHub Copilot CLI, Codex, and Kiro CLI
+- Creates real skills directories and links each repository-managed skill separately for Claude Code, GitHub Copilot CLI, and Codex
 - Links the canonical credential safety policy at native global instruction entry points when vacant; preserves conflicts and reports manual integration steps (see [Agent credential safety](#agent-credential-safety))
 - Creates `alias/.user_alias` and `alias/.env` if they don't exist; new `.env` files have owner-only permissions (`0600`)
 - Links `zsh/starship.toml` to `~/.config/starship.toml` when it is missing; an existing file or unrelated symlink is preserved with a warning
@@ -91,12 +91,12 @@ Later layers win over earlier ones.
   - `ZSH_THEME` overrides the fallback theme (only visible without starship).
   - `STARSHIP_CONFIG=<path>` points starship at another config on this machine.
   - An optional, commented `pyenv init` block; see the pyenv bullet in [Design decisions](#design-decisions).
-- `~/.zshrc` below the shared source line: anything that must run after the shared setup (Kiro blocks, Docker completions, local PATH additions, `SOPS_AGE_KEY_FILE`).
+- `~/.zshrc` below the shared source line: anything that must run after the shared setup (Docker completions, local PATH additions, `SOPS_AGE_KEY_FILE`).
 
 ### Design decisions
 
 - **The prompt is starship.** `ZSH_THEME` stays `robbyrussell` only as a fallback; `starship init zsh` runs after oh-my-zsh and replaces the theme prompt. Prompt colors and layout belong in `zsh/starship.toml`, so one edit reaches every laptop.
-- **`~/.zshrc` is not symlinked.** Tools such as Kiro and Docker edit it, and it holds machine-only blocks. The shared file is sourced instead.
+- **`~/.zshrc` is not symlinked.** Tools such as Docker edit it, and it holds machine-only blocks. The shared file is sourced instead.
 - **Existing oh-my-zsh setups keep working.** The shared file skips oh-my-zsh when `omz` is already defined, then loads any missing shared plugins directly. Syntax highlighting loads after the other shared shell setup.
 - **Double loading is avoided.** The shared file checks for the plugin functions before sourcing fallback plugin files, so plugins already loaded by `~/.zshrc` are left alone.
 - **Starship has no include mechanism.** A per-machine prompt difference needs a second toml selected with `STARSHIP_CONFIG` in `zsh/.zshrc.local`.
@@ -125,9 +125,9 @@ In Warp, open **Settings → Appearance → Text, fonts, & cursor** and select *
 
 ## Shared AI Skills
 
-`skills/` is the canonical source for manually maintained skills shared by Claude Code, GitHub Copilot CLI, Codex, and Kiro CLI. `install.sh` keeps `~/.claude/skills/`, `~/.copilot/skills/`, `~/.agents/skills/`, and `~/.kiro/skills/` as real directories and creates one symlink per skill in each. It only links directories containing `SKILL.md`, and it preserves unrelated tool-managed files and skills.
+`skills/` is the canonical source for manually maintained skills shared by Claude Code, GitHub Copilot CLI, and Codex. `install.sh` keeps `~/.claude/skills/`, `~/.copilot/skills/`, and `~/.agents/skills/` as real directories and creates one symlink per skill in each. It only links directories containing `SKILL.md`, and it preserves unrelated tool-managed files and skills.
 
-Claude Code ships its own `skill-creator` plugin, so the installer does not link the repository copy into `~/.claude/skills/`; it removes an existing installer-owned link there and keeps linking the skill for GitHub Copilot CLI, Codex, and Kiro CLI, which have no such plugin. Custom files, directories, and links to other sources are preserved, and `doctor` warns if the duplicate link reappears.
+Claude Code ships its own `skill-creator` plugin, so the installer does not link the repository copy into `~/.claude/skills/`; it removes an existing installer-owned link there and keeps linking the skill for GitHub Copilot CLI and Codex, which have no such plugin. Custom files, directories, and links to other sources are preserved, and `doctor` warns if the duplicate link reappears.
 
 Claude Code manages `~/.claude/skills/synced/` itself. That runtime data stays outside the repository. If an older installation has Claude's `synced/` data under `claude/skills/synced/`, `install.sh` moves it to `~/.claude/skills/synced/` after replacing the old parent symlink; if both locations already exist, it preserves both and warns.
 
@@ -145,7 +145,7 @@ Repository-managed skills:
 | `implement-spec` | Implement a spec while maintaining `implementation-notes.html` |
 | `learn-quiz` | Teach a topic in stages and check understanding with quizzes |
 | `orca-issue-workspace` | Dispatch tasks or GitHub issues to an engineer in an Orca worktree and lead review and delivery |
-| `skill-creator` | Create, update, and evaluate shared agent skills (GitHub Copilot CLI, Codex, and Kiro CLI only) |
+| `skill-creator` | Create, update, and evaluate shared agent skills (GitHub Copilot CLI and Codex only) |
 | `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals, current checks, and the PR checklist (unticked items block the merge unless the user waives them), then close out ClickUp (Azure DevOps) and worktrees |
 | `squash-git-commits` | Squash feature-branch commits into one relative to the selected PR or repository target branch |
 | `summarize-pr` | Summarize branch changes and update the Azure DevOps PR description, preserving the `create-pr` risk block |
@@ -178,7 +178,6 @@ These are instruction entry points, separate from the shared skill directories.
 |-------|------------------------------|----------------------------------|
 | Codex CLI | `${CODEX_HOME:-~/.codex}/AGENTS.md` | Global instructions load before project instructions. A global `AGENTS.override.md` takes priority; installation skips Codex when that path exists, even if empty or dangling. Project overrides and instruction size limits can affect coverage. |
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/rules/dotfiles-security.md` | User rules without `paths` load for every project. The main `CLAUDE.md` is left intact. User rules support symlinks; disabled/excluded user instructions can prevent loading. |
-| Kiro CLI | `~/.kiro/steering/dotfiles-security.md` | Global steering is always included by default. Custom profiles can omit default resources; verify the active agent. Workspace steering can override global guidance. |
 | GitHub Copilot CLI | `${COPILOT_HOME:-~/.copilot}/copilot-instructions.md` | Personal instructions apply across repositories and combine with repository instructions. An existing personal instruction file requires manual integration. |
 | Orca ADE | None | An independent global instruction-loading contract could not be verified. Do not assume a wrapped CLI, IDE, or hosted agent inherits these files; verify the active harness separately. |
 
@@ -186,7 +185,6 @@ Official sources checked on October 16, 2026:
 
 - [Codex instruction discovery](https://developers.openai.com/codex/guides/agents-md/): one global file, then project files from the project root down to the working directory; default instruction limit is 32 KiB. A Markdown link or Claude-style `@` reference is not a verified Codex import mechanism.
 - [Claude Code memory and user rules](https://code.claude.com/docs/en/memory) and [configuration directory override](https://code.claude.com/docs/en/env-vars): project instructions use `CLAUDE.md`/`.claude/CLAUDE.md`; current releases also have conditional `AGENTS.md` support. The global rule avoids depending on that version-specific fallback.
-- [Kiro steering](https://kiro.dev/docs/steering/) and [custom agent resources](https://kiro.dev/docs/custom-agents/configuration-reference/): the steering page requires explicit resources for custom agents, while the configuration reference describes inheritance unless `chat.disableInheritingDefaultResources` is enabled. Treat custom profile coverage as unverified until checked. A custom agent can explicitly include an absolute `file://` path to the installed policy in its `resources` array.
 - [Copilot CLI custom instructions](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions): repository `AGENTS.md`, `.github/copilot-instructions.md`, and modular instructions also load. The personal file is an unconditional entry point without an extra environment variable or import. Modular user instructions are another documented option for manual integration.
 
 ### Existing machines and custom instructions
@@ -229,9 +227,8 @@ overrides, warning semantics, and secret-free output. They do not prove model
 adherence. Runtime CLI verification, where performed, is recorded in the PR.
 
 For a CLI upgrade, use an empty temporary home/profile and project with synthetic
-instructions to check loading. Claude's `/context`, Kiro's `/context show` (where
-available), and Copilot's `/instructions` expose instruction sources. Codex can
-report active instructions in a synthetic session. Avoid enabling raw debug or
+instructions to check loading. Claude's `/context` and Copilot's `/instructions`
+expose instruction sources. Codex can report active instructions in a synthetic session. Avoid enabling raw debug or
 session logs against real configurations. Restart sessions after policy changes.
 
 Instructions reduce accidental disclosure; they cannot guarantee arbitrary models,
@@ -242,8 +239,7 @@ Existing workflows that pass tokens as process arguments still need separate
 transport hardening; the policy tells agents to choose a safe transport or stop.
 
 Stronger enforcement is separate work: [Claude PreToolUse hooks](https://code.claude.com/docs/en/hooks)
-can deny a tool call, [Kiro permissions](https://kiro.dev/docs/permissions/)
-can restrict capabilities, and Copilot provides tool-deny flags. Narrow filesystem
+can deny a tool call, and Copilot provides tool-deny flags. Narrow filesystem
 restrictions or credential-safe request helpers could reduce exposure, but broad
 shell blocking is bypassable and can break legitimate workflows. Post-output
 redaction cannot undo disclosure already captured upstream. This installation
