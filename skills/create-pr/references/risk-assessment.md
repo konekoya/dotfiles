@@ -57,4 +57,3 @@ No risk found: data, API, blast radius, business logic, performance, ops.
 ```
 
 Placement: for Azure DevOps, directly below the `Closes <ClickUp URL>` line (or at the top when that line is absent) and above `## 摘要`. For GitHub, above the first body section; when a PR template applies, insert the block above the template's first heading and leave the template untouched. In update mode, replace the existing marked block; if none exists, insert a new one.
-
