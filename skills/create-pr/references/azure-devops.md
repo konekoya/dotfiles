@@ -77,12 +77,11 @@ If `CLICKUP_API_TOKEN` isn't set, or the fetch fails, fall back to drafting `<de
 - If no ClickUp bracket is available: insert the type prefix resolved in shared step 5 if missing, or correct it if present but not one of the table in shared step 5.
 - Don't touch parts of the title that are already correct.
 
-**Description.** Follow the exact structure the `summarize-pr` skill uses: default to Traditional Chinese (繁體中文) unless the user or repository instructions require another language. Section headings (`## 摘要`, `## 主要變更`, `## 測試`, `## Code Review`) and prose are in Chinese; code identifiers, file paths, function/variable names, and error strings stay verbatim in their original form.
+**Description.** Follow the exact structure the `summarize-pr` skill uses: default to Traditional Chinese (繁體中文) unless the user or repository instructions require another language. Section headings (`## 摘要`, `## 主要變更`, `## 測試`) and prose are in Chinese; code identifiers, file paths, function/variable names, and error strings stay verbatim in their original form.
 
 - **`## 摘要`** (1–2 sentences) — core purpose and impact; the reader should understand the goal in one read.
 - **`## 主要變更`** (grouped bullets) — grouped logically by domain/layer (feature/fix/refactor/tests/docs as applicable), from the implementation's perspective, not a verbatim replay of commit messages. Subheadings OK if groups are substantial. Keep bullets short and scannable; testing-related bullets belong only in `## 測試`, never repeated here.
 - **`## 測試`** (bullet or paragraph) — test files added or modified (UT/IT/E2E), one bullet each with what it covers. If no tests added, note that. Don't include run status, pass counts, or manual test steps — every PR is already gated by CI.
-- **`## Code Review`** (bullet or paragraph) — review rounds and key feedback addressed, conflicts resolved, pull from PR comment threads if available (cross-reference `pr-comments`/`address-pr-review`), not just local git. Only include this section if the branch has actually been through review — for a brand-new PR being created here, that will almost always mean omitting it entirely, so don't emit an empty heading. (In update mode, check whether the existing PR has review history before deciding.)
 
 The `Closes <ClickUp URL>` line still goes at the very top, above `## 摘要`, separated by a blank line. The marked `## 風險評估` block from [risk-assessment.md](risk-assessment.md) is the last thing in the description, below the final section, with the PR checklist inside it:
 

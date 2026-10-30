@@ -1,6 +1,6 @@
 ---
 name: summarize-pr
-description: 'Summarize the current branch''s implementation from local git history/diff into structured sections (Summary, Main Changes, Testing, Code Review), then update the Azure DevOps PR description. Use when: summarize PR, update PR description, what did this branch do, describe PR changes, fill in PR description.'
+description: 'Summarize the current branch''s implementation from local git history/diff into structured sections (Summary, Main Changes, Testing), then update the Azure DevOps PR description. Use when: summarize PR, update PR description, what did this branch do, describe PR changes, fill in PR description.'
 ---
 
 # Summarize PR
@@ -89,7 +89,7 @@ This classification feeds the Testing section below.
 
 ### 6. Draft the summary
 
-Always draft the PR description in Traditional Chinese (繁體中文), regardless of the language used in commit messages or existing PR discussion. Section headings (`## 摘要`, `## 主要變更`, `## 測試`, `## Code Review`) and prose are in Chinese; code identifiers, file paths, function/variable names, and error strings stay verbatim in their original form.
+Always draft the PR description in Traditional Chinese (繁體中文), regardless of the language used in commit messages or existing PR discussion. Section headings (`## 摘要`, `## 主要變更`, `## 測試`) and prose are in Chinese; code identifiers, file paths, function/variable names, and error strings stay verbatim in their original form.
 
 Organize the PR description into these sections:
 
@@ -113,15 +113,6 @@ From the test-file classification above: for each test file added or modified in
 
 **Missing-test flag**: if the diff has non-test source changes but zero test files changed, append one soft, informational note, e.g. `⚠️ 此 PR 修改了程式碼但未新增或修改測試（UT/IT/E2E）。` — this does not block or pause the flow, it's just part of the drafted description shown to the user in the confirmation step.
 
-#### **Code Review** (bullet or paragraph)
-- Review rounds and key feedback addressed
-- Conflicts resolved or ambiguities clarified
-- Pull rounds/feedback from PR comment threads if available (cross-reference `pr-comments`/`address-pr-review`), not just local git
-- If the branch hasn't been through review yet, omit this section entirely — don't emit an empty heading
-
-Example:
-
-```markdown
 ## 摘要
 把 Website 物件的預覽流程從 iframe embed 改為串接後端 FileAsset 截圖 pipeline，讓 canvas 上所有 Website 物件走同一套 fileId/screenshotUrl 資料流。
 
@@ -137,9 +128,6 @@ Example:
 ## 測試
 - 新增 `website-screenshot.service.spec.ts`（UT）：涵蓋輪詢邏輯與 in-flight Observable 共用
 - 新增 `color-picker.it.ts`（Playwright E2E）：涵蓋 Add Website 彈窗的截圖預覽三態
-
-## Code Review
-- 共歷經 5 輪 review，發現的問題（取消/去重、快取無界成長、runtime 欄位洩漏等）皆已修正
 ```
 
 ### 7. Confirm with the user
