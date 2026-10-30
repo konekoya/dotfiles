@@ -35,11 +35,25 @@ Use the max, not an average: one severe risk must not be diluted by many quiet d
 
 ## Output
 
-Include only dimensions rated 1 or higher, highest first, each with evidence (`path:line`) and the concrete check a human should do. Name the modifiers applied. Collapse the rest into one line. Record the scored commit: `git rev-parse --short HEAD`. When the head commit moves after scoring (a new push in update mode), score again; never carry a stale level over.
+Include only dimensions rated 1 or higher, highest first. Each finding states the evidence (`path:line`) and why it is risky, not what to do about it: the actions live only in the checklist below, so nothing is listed twice. Name the modifiers applied. Collapse the rest into one line. Record the scored commit: `git rev-parse --short HEAD`. When the head commit moves after scoring (a new push in update mode), score again; never carry a stale level over.
 
 An L3 PR may suggest a reviewer in the preview, but never add or change reviewers automatically. The block is the only output: do not add labels, statuses, or comments.
 
-Language follows the description. Azure DevOps default is Traditional Chinese with the `## 風險評估` heading; GitHub follows the user, repository, or English with `## Risk Assessment`. Dimension names, paths, and identifiers stay verbatim.
+### Checklist
+
+Add a checklist for the PR owner, who does the manual QA and review. The PR counts as checked only when every box is ticked. Build it from:
+
+- Every dimension rated 2 or 3: one item per distinct behavior or file to verify, so each can be ticked on its own. Rating 1 gets no item.
+- Each applied modifier that asks for work: test gap becomes "add a test, or confirm why none is needed".
+- L3: an item to confirm the rollback plan.
+
+Each item is one concrete action with an observable pass condition, prefixed with its dimension and naming the file: `- [ ] UI regression: <what to do and what to expect> (`path`)`. A behavior change that is deliberate still gets an item to confirm the owner accepts it. Omit the section when no item qualifies; never emit an empty heading.
+
+Never tick a box yourself. Tick one only when the user says they did that check. In update mode, regenerate the checklist from the new score. Keep a box ticked only when the item text is unchanged and the files it names are unchanged since the previous `scored at` commit (`git diff <old>..HEAD -- <paths>` is empty); otherwise reset it to unticked, because the code it vouched for has moved.
+
+### Language and markers
+
+Language follows the description. Azure DevOps default is Traditional Chinese with the `## 風險評估` and `### PR 檢查清單` headings; GitHub follows the user, repository, or English with `## Risk Assessment` and `### PR Checklist`. Paths and identifiers stay verbatim. In Chinese output, write the closing no-risk line entirely in Chinese too, using these names: Security 資安, UI regression UI 迴歸, Data and migration 資料, API and contract API, Blast radius 影響範圍, Business logic 業務邏輯, Performance 效能, Ops and rollback 維運. Use `未發現風險：資安、資料、API、效能、維運。` rather than an English `No risk found:` line.
 
 Wrap the section in markers so later runs and other skills can find and replace it without touching the rest of the body:
 
@@ -48,12 +62,35 @@ Wrap the section in markers so later runs and other skills can find and replace 
 ## Risk Assessment
 **Overall: L2 (focused review)** · scored at `abc1234`
 
-- Security, 3: `auth/guard.ts:40-80` changes the permission check. Confirm access is not widened.
-- UI regression, 2: shared `Button` styles change. Open the main screens and compare.
+- Security, 3: `auth/guard.ts:40-80` changes the permission check; access could be widened.
+- UI regression, 2: shared `Button` styles change on the main screens.
 - Modifier: +1 test gap (source changed, no tests changed).
 
 No risk found: data, API, blast radius, business logic, performance, ops.
+
+### PR Checklist
+- [ ] Security: confirm a user without the role is still denied (`auth/guard.ts:40-80`)
+- [ ] UI regression: open the main screens and compare `Button` against the previous build (`Button.scss`)
+- [ ] Test gap: add a test for the guard, or note why none is needed
 <!-- risk-assessment:end -->
 ```
 
-Placement: for Azure DevOps, directly below the `Closes <ClickUp URL>` line (or at the top when that line is absent) and above `## 摘要`. For GitHub, above the first body section; when a PR template applies, insert the block above the template's first heading and leave the template untouched. In update mode, replace the existing marked block; if none exists, insert a new one.
+The Chinese form of the same block:
+
+```markdown
+<!-- risk-assessment:start -->
+## 風險評估
+**Overall: L2（重點審查）** · scored at `abc1234`
+
+- Security, 3：`auth/guard.ts:40-80` 變更權限檢查，存取範圍可能被放寬。
+- UI regression, 2：共用 `Button` 樣式變更，影響主要畫面。
+
+未發現風險：資料、API、影響範圍、業務邏輯、效能、維運。
+
+### PR 檢查清單
+- [ ] Security：確認沒有該角色的使用者仍被拒絕（`auth/guard.ts:40-80`）
+- [ ] UI regression：開啟主要畫面，與前一版比對 `Button`（`Button.scss`）
+<!-- risk-assessment:end -->
+```
+
+Placement: always the very end of the description, below the last section, separated by a blank line. For Azure DevOps, below `## 測試` (or `## Code Review` when present). For GitHub, below the last body section; when a PR template applies, append the block after the template's last section and leave the template untouched. In update mode, regenerate the block and place it at the end, removing the old block wherever it was (older PRs carry it at the top).
