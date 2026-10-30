@@ -385,7 +385,7 @@ for cmd in delta fzf jq curl python3 docker az gh starship magick; do
     curl)   pkg="curl";       note="API-backed PR commands need curl" ;;
     python3) pkg="python";    note="server alias and some regression checks are unavailable" ;;
     docker) pkg="docker";     note="docker-clean is unavailable without the Docker CLI" ;;
-    az)     pkg="azure-cli";  note="Azure DevOps profiles using auth=azure-cli are unavailable; PAT profiles remain supported" ;;
+    az)     pkg="--cask azure-cli"; note="Azure DevOps profiles using auth=azure-cli are unavailable; PAT profiles remain supported" ;;
     gh)     pkg="gh";         note="GitHub CLI auth fallback unavailable; GITHUB_TOKEN remains supported" ;;
     starship) pkg="starship"; note="shared prompt unavailable; zsh falls back to the oh-my-zsh theme (needs a Nerd Font)" ;;
     magick) pkg="imagemagick"; note="image-shrink is unavailable" ;;
