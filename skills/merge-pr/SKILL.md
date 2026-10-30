@@ -32,10 +32,10 @@ For each candidate PR, use the reference's readiness query. A PR is ready only w
 
 - **No block**: report `no risk assessment` and continue; the PR predates the checklist or was not made by `create-pr`.
 - **All items ticked** (`- [x]`) or no checklist items: report the overall risk rating exactly as the block writes it (for example `🟡 中（2/3）`) and `checklist complete`.
-- **Any item unticked** (`- [ ]`): the PR is not ready. List each unticked item verbatim with the overall risk rating, and do not merge. Only the user may waive this: merge only after they explicitly accept the listed items for that PR, and record the waiver in the final report.
+- **Any item unticked** (`- [ ]`): the PR is not ready. List each unticked item verbatim, with the dimension it belongs to (the `####` heading above it, or the prefix on the item in an older block) and the overall risk rating, and do not merge. Only the user may waive this: merge only after they explicitly accept the listed items for that PR, and record the waiver in the final report.
 - **Stale score**: when the block's `scored at` commit is not the PR's current head, ticks and items may describe older code. Report it and ask whether to refresh with `create-pr` or merge anyway; do not treat stale ticks as complete.
 
-When the overall rating is high (3/3), also report the block's `回復方式` / `Rollback` line verbatim, so the rollback is visible before the merge; it is a statement, not a box, and does not gate the merge by itself. Read the block the same way whatever format version wrote it: only the markers and the `- [ ]` / `- [x]` boxes matter.
+When the overall rating is high (3/3), also report the block's `回復方式` / `Rollback` line verbatim, so the rollback is visible before the merge; it is a statement, not a box, and does not gate the merge by itself. Read the block the same way whatever format version wrote it: only the markers, the `- [ ]` / `- [x]` boxes and, for naming an item's dimension, its `####` heading or old prefix matter. Never decide readiness from an item's wording.
 
 Never tick or edit a checklist box yourself, not even when the user says they verified it; ask them to tick it, or to say explicitly that the item is waived.
 

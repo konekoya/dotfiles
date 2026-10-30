@@ -54,11 +54,11 @@ Add a manual test checklist for the PR owner, who does the manual QA and review.
 - Every dimension rated 2 or 3: one item per distinct behavior to verify, so each can be ticked on its own. Rating 1 gets no item.
 - Each applied modifier that asks for work: test gap becomes "add a test, or confirm why none is needed".
 
-Each item is one concrete action with an observable pass condition, prefixed with its dimension name: `- [ ] UI 迴歸：<what to do and what to expect>` (English: `- [ ] UI regression: …`). Do not name files, paths, or identifiers in an item; the owner tests behavior, and the paths already sit in the finding above. A behavior change that is deliberate still gets an item to confirm the owner accepts it. Omit the section when no item qualifies; never emit an empty heading.
+Group the checklist by dimension: one `####` heading per dimension that has items, titled with the dimension name (Chinese output: 資安, UI 迴歸, 資料, API, 影響範圍, 業務邏輯, 效能, 維運; English: Security, UI regression, and so on), and the test gap modifier under `#### 缺少測試` (English `#### Test gap`). Order the headings like the findings, highest rating first, with the test gap last. Under each heading list its `- [ ]` items; an item carries no dimension prefix because the heading names it.
 
-Never tick a box yourself. Tick one only when the user says they did that check. In update mode, regenerate the checklist from the new score and carry ticks over by meaning, not by text: an old item and a new item are the same when they have the same dimension and check the same behavior. The English and Chinese names of a dimension (including the English prefixes older Chinese blocks used) are the same dimension. Keep the box ticked when the behavior is the same and the files in its finding's evidence are unchanged since the previous `scored at` commit (`git diff <old>..HEAD -- <paths>` is empty); read that evidence from the old finding's `path:line`. Reset it to unticked only when the behavior or those files changed, because the code it vouched for has moved. A change of wording or format alone never resets a box.
+Each item is one check with an observable pass condition, short enough to read on one line: about 40 Chinese characters or 80 English characters. If a check needs more, split it into two items. Do not name files, paths, or identifiers in an item; the owner tests behavior, and the paths already sit in the finding above. A behavior change that is deliberate still gets an item to confirm the owner accepts it. Omit the section when no item qualifies; never emit an empty heading.
 
-### Language and markers
+Never tick a box yourself. Tick one only when the user says they did that check. In update mode, regenerate the checklist from the new score and carry ticks over by meaning, not by text: an old item and a new item are the same when they have the same dimension and check the same behavior. Take an item's dimension from the `####` heading it sits under; in a block from before the grouped format, take it from the dimension prefix on the item. The English and Chinese names of a dimension (including the English prefixes older Chinese blocks used) are the same dimension. Keep the box ticked when the behavior is the same and the files in its finding's evidence are unchanged since the previous `scored at` commit (`git diff <old>..HEAD -- <paths>` is empty); read that evidence from the old finding's `path:line`. Reset it to unticked only when the behavior or those files changed, because the code it vouched for has moved. A change of wording, grouping or format alone never resets a box.
 
 Language follows the description. Azure DevOps default is Traditional Chinese with the `## 風險評估` and `### 手動測試清單` headings; GitHub follows the user, repository, or English with `## Risk Assessment` and `### Manual test checklist`. Paths and identifiers stay verbatim. In Chinese output use the Chinese dimension names everywhere: in findings, in checklist prefixes, and in the closing no-risk line. The names are Security 資安, UI regression UI 迴歸, Data and migration 資料, API and contract API, Blast radius 影響範圍, Business logic 業務邏輯, Performance 效能, Ops and rollback 維運. Use `未發現風險：資安、資料、API、效能、維運。` rather than an English `No risk found:` line.
 
@@ -69,18 +69,22 @@ Wrap the section in markers so later runs and other skills can find and replace 
 ## Risk Assessment
 **Overall risk: 🔴 High (3/3)**: domain-expert review and a hands-on walkthrough; confirm the rollback before merging · scored at `abc1234`
 
-- Security 🔴 High (3/3): `auth/guard.ts:40-80` changes the permission check; access could be widened.
+- Security 🟡 Medium (2/3): `auth/guard.ts:40-80` reads the role from the request without validating it.
 - UI regression 🟡 Medium (2/3): shared `Button` styles change on the main screens.
-- Modifier: +1 test gap (source changed, no tests changed).
+- Modifier: +1 test gap (source changed, no tests changed), so 2 becomes 3.
 
 No risk found: data, API, blast radius, business logic, performance, ops.
 
 Rollback: revert this PR and redeploy the previous version.
 
 ### Manual test checklist
-- [ ] Security: confirm a user without the role is still denied
-- [ ] UI regression: open the main screens and compare the buttons against the previous build
-- [ ] Test gap: add a test for the guard, or note why none is needed
+#### Security
+- [ ] Send a request with a forged role; expect it to be denied
+- [ ] Send a request without a role; expect it to be denied
+#### UI regression
+- [ ] Open the main screens; compare the buttons with the previous build
+#### Test gap
+- [ ] Add a test for the guard, or note why none is needed
 <!-- risk-assessment:end -->
 ```
 
@@ -91,21 +95,25 @@ The Chinese form of the same block:
 ## 風險評估
 **整體風險：🔴 高（3/3）**：需熟悉該領域的人審查並實際操作，合併前確認回復方式 · scored at `abc1234`
 
-- 資安 🔴 高（3/3）：`auth/guard.ts:40-80` 變更權限檢查，存取範圍可能被放寬。
+- 資安 🟡 中（2/3）：`auth/guard.ts:40-80` 未驗證即讀取請求中的角色。
 - UI 迴歸 🟡 中（2/3）：共用 `Button` 樣式變更，影響主要畫面。
-- 調整：+1 缺少測試（程式碼有變更，但沒有測試變更）。
+- 調整：+1 缺少測試（程式碼有變更，但沒有測試變更），由 2 升為 3。
 
 未發現風險：資料、API、影響範圍、業務邏輯、效能、維運。
 
 回復方式：還原此 PR 並重新部署前一版。
 
 ### 手動測試清單
-- [ ] 資安：確認沒有該角色的使用者仍被拒絕
-- [ ] UI 迴歸：開啟主要畫面，與前一版比對按鈕外觀
-- [ ] 缺少測試：補上權限檢查的測試，或說明不需要的原因
+#### 資安
+- [ ] 以偽造的角色送出請求，確認被拒絕
+- [ ] 不帶角色送出請求，確認被拒絕
+#### UI 迴歸
+- [ ] 開啟主要畫面，與前一版比對按鈕外觀
+#### 缺少測試
+- [ ] 補上權限檢查的測試，或說明不需要的原因
 <!-- risk-assessment:end -->
 ```
 
 Placement: always the very end of the description, below the last section, separated by a blank line. For Azure DevOps, below `## 自動化測試`. For GitHub, below the last body section; when a PR template applies, append the block after the template's last section and leave the template untouched. In update mode, regenerate the block and place it at the end, removing the old block wherever it was (older PRs carry it at the top).
 
-Backward compatibility: a block written before this format (`**Overall: L2 …**` overall line, `### PR Checklist` or `### PR 檢查清單` heading, `Security, 3：` findings) is regenerated in the current format in update mode, and its ticks carry over by the rule above.
+Backward compatibility: a block written before this format (`**Overall: L2 …**` overall line, `### PR Checklist` or `### PR 檢查清單` heading, `Security, 3：` findings, items with a dimension prefix instead of `####` headings) is regenerated in the current format in update mode, and its ticks carry over by the rule above.
