@@ -446,6 +446,29 @@ repo
 
 Supports SSH and HTTPS remotes, including legacy Azure DevOps `visualstudio.com` URLs.
 
+### `clickup`
+
+Read and update ClickUp tasks without interactive prompts. Requires `jq`, `curl`,
+ and `CLICKUP_API_TOKEN` loaded on demand from the environment or `alias/.env`.
+
+```sh
+clickup task example123 --json
+clickup status example123 "In Progress"
+clickup comment example123 ./comment.txt
+printf 'A comment\n' | clickup comment example123 -
+clickup open --list 12345 --assignee me
+clickup snapshot --since 2026-01-01 --list 12345
+```
+
+Task IDs can also be full task URLs. Status names are matched case-insensitively
+against the task's list; unknown or ambiguous names leave the task unchanged.
+Without `--list`, open and snapshot read `~/.clickup_lists.json`, an array of
+objects with `id` and `name` as used by `create-clickup-task`. Both commands
+output TSV fields for list, ID, status, assignees, update time (Unix milliseconds),
+and name. Snapshot includes open tasks plus closed tasks updated on or after the
+specified local date. Exit codes are 0 for success, 1 for usage errors, 2 for API
+or authentication errors, and 3 for unknown or ambiguous statuses.
+
 ### `submit-pr`
 
 Creates an Azure DevOps PR from the current branch and links it to a ClickUp task.
@@ -679,8 +702,8 @@ and on cancellation or interruption.
 |------|-------------|---------|
 | `delta` | git diff pager | `brew install git-delta` |
 | `fzf` | `cmds`, `track-branch`, `image-shrink` picker (optional; all have Bash fallbacks); shell key bindings in `zsh/.zshrc.shared` (0.48+, optional) | `brew install fzf` |
-| `jq` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`; optional PR lookup in `repo` | `brew install jq` |
-| `curl` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`; optional PR lookup in `repo` | usually pre-installed |
+| `jq` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`, `clickup`; optional PR lookup in `repo` | `brew install jq` |
+| `curl` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`, `clickup`; optional PR lookup in `repo` | usually pre-installed |
 | `az` | Azure DevOps profiles configured with `auth = azure-cli` | `brew install --cask azure-cli` |
 | `gh` | `gh-auth` and the GitHub skills; optional GitHub auth for `repo` | `brew install gh` |
 | `starship` | shared prompt (`zsh/starship.toml`); needs a Nerd Font, falls back to the oh-my-zsh theme without it | `brew install starship` |
@@ -833,7 +856,7 @@ Migration: if you relied on `alias/.env` to export other variables into your she
 
 | Variable | Used by | Required? |
 |-------|---------|-----------|
-| `CLICKUP_API_TOKEN` | `submit-pr`, `create-clickup-task`, Azure DevOps mode of `create-pr` | No — ClickUp integration is skipped if unset |
+| `CLICKUP_API_TOKEN` | `clickup`, `submit-pr`, `create-clickup-task`, Azure DevOps mode of `create-pr` | Required for `clickup`; other integrations can skip ClickUp if unset |
 | `AZURE_DEVOPS_PAT_<PROFILE>` | Azure DevOps REST calls for the selected Git config profile; for example `AZURE_DEVOPS_PAT_WORK_COMPANY_A` | Required for a `pat` profile |
 | `AZURE_DEVOPS_PAT` | Legacy single-organization REST setup | No — use only with matching `AZURE_DEVOPS_ORG` |
 | `AZURE_DEVOPS_ORG` | Legacy single-org setup; explicit organization for `pr` outside a repository | No — must match a repository remote and never overrides it |

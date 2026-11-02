@@ -1,0 +1,101 @@
+#!/bin/bash
+# Description: View and update ClickUp tasks non-interactively
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/local-env.sh
+source "$ROOT/lib/local-env.sh"
+# shellcheck source=lib/http.sh
+source "$ROOT/lib/http.sh"
+# shellcheck source=lib/clickup.sh
+source "$ROOT/lib/clickup.sh"
+usage() {
+  cat <<'USAGE'
+Usage: clickup task <id|url> [--json]
+       clickup status <id|url> <status>
+       clickup comment <id|url> <file|->
+       clickup open [--list <id>]... [--assignee me]
+       clickup snapshot --since <YYYY-MM-DD> [--list <id>]...
+USAGE
+}
+fail_usage() { usage >&2; exit 1; }
+api_error() { echo 'ClickUp API or authentication error.' >&2; exit 2; }
+valid_id() { [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]]; }
+task_id() {
+  local value="$1"
+  case "$value" in
+    http://*|https://*) value="${value%%\#*}"; value="${value%%\?*}"; value="${value%/}"; value="${value##*/}" ;;
+  esac
+  valid_id "$value" || return 1
+  printf '%s' "$value"
+}
+[ "$#" -gt 0 ] || fail_usage
+command="$1"; shift
+case "$command" in --help|-h) [ "$#" -eq 0 ] || fail_usage; usage; exit 0 ;; task|status|comment|open|snapshot) ;; *) fail_usage ;; esac
+id=''; json=false; since=''; assignee=''; lists=()
+case "$command" in
+  task) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail_usage; id="$(task_id "$1")" || fail_usage; shift; if [ "$#" -gt 0 ]; then [ "$1" = --json ] || fail_usage; json=true; fi ;;
+  status|comment) [ "$#" -eq 2 ] || fail_usage; id="$(task_id "$1")" || fail_usage; value="$2" ;;
+  open|snapshot)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --list) [ "$#" -ge 2 ] && valid_id "$2" || fail_usage; lists+=("$2"); shift 2 ;;
+        --assignee) [ "$command" = open ] && [ "$#" -ge 2 ] && [ "$2" = me ] && [ -z "$assignee" ] || fail_usage; assignee=me; shift 2 ;;
+        --since) [ "$command" = snapshot ] && [ "$#" -ge 2 ] && [ -z "$since" ] || fail_usage; since="$2"; shift 2 ;;
+        *) fail_usage ;;
+      esac
+    done
+    if [ "$command" = snapshot ]; then
+      [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || fail_usage
+      epoch="$(date -j -f '%Y-%m-%d %H:%M:%S' "$since 00:00:00" '+%s' 2>/dev/null || date -d "$since" '+%s' 2>/dev/null)" || fail_usage
+      # Reject dates that date normalizes instead of interpreting literally.
+      check_date="$(date -r "$epoch" '+%Y-%m-%d' 2>/dev/null || date -d "@$epoch" '+%Y-%m-%d' 2>/dev/null)" || fail_usage
+      [ "$check_date" = "$since" ] || fail_usage
+    fi
+    if [ "${#lists[@]}" -eq 0 ]; then
+      [ -f "$HOME/.clickup_lists.json" ] || { echo 'No lists configured; use --list.' >&2; exit 1; }
+      list_data="$(jq -er 'if type == "array" and all(.[]; (.id | type == "string" or type == "number")) then .[] | .id | tostring else error("invalid lists") end' "$HOME/.clickup_lists.json" 2>/dev/null)" || { echo 'No valid lists configured; use --list.' >&2; exit 1; }
+      while IFS= read -r list; do valid_id "$list" || fail_usage; lists+=("$list"); done <<< "$list_data"
+    fi ;;
+esac
+command -v jq >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 || api_error
+local_env_load CLICKUP_API_TOKEN
+[ -n "${CLICKUP_API_TOKEN:-}" ] || api_error
+export -n CLICKUP_API_TOKEN
+case "$command" in
+  task)
+    task="$(clickup_task "$id")" || api_error
+    if ! printf '%s' "$task" | jq -e '.id and .name and .status.status and .list.name and .url' >/dev/null 2>&1; then api_error; fi
+    if "$json"; then printf '%s\n' "$task" | jq '{id, status: .status.status, title: .name, list: .list.name, url}'; else printf '%s\n' "$task" | jq -r '"id: \(.id)\nstatus: \(.status.status)\ntitle: \(.name)\nlist: \(.list.name)\nurl: \(.url)"'; fi ;;
+  status)
+    task="$(clickup_task "$id")" || api_error
+    list="$(printf '%s' "$task" | jq -er '.list.id | select(. != null) | tostring')" || api_error
+    valid_id "$list" || api_error
+    statuses="$(clickup_list "$list")" || api_error
+    if ! printf '%s' "$statuses" | jq -e '.statuses | type == "array" and all(.[]; (.status | type == "string"))' >/dev/null 2>&1; then api_error; fi
+    matches="$(clickup_resolve_status "$statuses" "$value")" || api_error
+    if [ "$(printf '%s' "$matches" | jq 'length')" -ne 1 ]; then
+      echo 'Unknown or ambiguous status. Available statuses:' >&2
+      printf '%s' "$statuses" | jq -r '.statuses[].status' >&2
+      exit 3
+    fi
+    selected="$(printf '%s' "$matches" | jq -r '.[0]')"
+    clickup_update_status "$id" "$selected" || api_error ;;
+  comment)
+    if [ "$value" = - ]; then comment="$(cat; printf '.')"; else [ -f "$value" ] && [ -r "$value" ] || fail_usage; comment="$(cat "$value"; printf '.')" || fail_usage; fi
+    comment="${comment%.}"
+    clickup_comment "$id" "$comment" || api_error ;;
+  open|snapshot)
+    user_id=''; if [ "$assignee" = me ]; then user_id="$(clickup_user)" || api_error; fi
+    for list in "${lists[@]}"; do
+      list_json="$(clickup_list "$list")" || api_error
+      if ! printf '%s' "$list_json" | jq -e '(.name | type == "string") and (.statuses | type == "array")' >/dev/null; then api_error; fi
+      tasks="$(clickup_tasks "$list")" || api_error
+      printf '%s\n' "$tasks" | jq -r --argjson list "$list_json" --arg user "$user_id" --arg since "${epoch:-0}" --arg mode "$command" '
+        select(type == "object") |
+        . as $task |
+        ([$list.statuses[] | select((.status | ascii_downcase) == ($task.status.status | ascii_downcase)) | .type] | any(. == "closed" or . == "done")) as $closed |
+        select(($closed | not) or ($mode == "snapshot" and ((.date_updated // "0" | tonumber) >= (($since | tonumber) * 1000)))) |
+        select($user == "" or any(.assignees[]?; (.id | tostring) == $user)) |
+        [$list.name, .id, .status.status, ([.assignees[]?.username] | join(", ")), .date_updated, .name] | @tsv' || api_error
+    done ;;
+esac
