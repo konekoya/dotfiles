@@ -1,23 +1,23 @@
 # GitHub PR Operations
 
-Read this reference only for GitHub remotes. Use the GitHub CLI (`gh`); Azure tooling and ClickUp are unnecessary.
+Read this reference only for GitHub remotes. Use the GitHub CLI through the `gh-auth` wrapper, which passes `GITHUB_TOKEN` from `alias/.env` to that one process (never exported) and otherwise leaves `gh` on its own login; Azure tooling and ClickUp are unnecessary.
 
 ## Authentication and repository context
 
-Parse `GH_REPO` as `OWNER/REPO` from the selected remote, stripping an optional `.git` suffix. Pass `--repo "$GH_REPO"` to every PR command; `gh repo view` takes the repository as a positional argument.
+Parse `GH_REPO` as `OWNER/REPO` from the selected remote, stripping an optional `.git` suffix. Pass `--repo "$GH_REPO"` to every PR command; `gh-auth repo view` takes the repository as a positional argument.
 
 ```bash
-gh auth status --active --hostname github.com
+gh-auth --check
 ```
 
-If `gh` is missing, suggest `brew install gh`. If authentication fails, stop and suggest `gh auth login --hostname github.com`; never print tokens. A configured `GH_TOKEN` or `GITHUB_TOKEN` can also authenticate `gh`.
+Run every `gh` command below as `gh-auth <args>`. `gh-auth --check` exits 0 when authenticated (`GH_TOKEN`, `GITHUB_TOKEN` from the environment or `alias/.env`, or the `gh auth login` fallback); 10 when no credential exists (suggest setting `GITHUB_TOKEN` in `alias/.env` or `gh auth login --hostname github.com`); 11 when a configured credential is invalid or expired (ask the user to replace it; do not fall back silently); 12 when a sandbox or network restriction blocked the check (the credential was not tested: ask the user to approve the command outside the sandbox, do not report a login problem); 13 when `gh` is missing (`brew install gh`). It prints only a status line, never a token. Never print tokens. Stop on any non-zero exit.
 
 For an ordinary repository, `GH_REPO` is both the source and base repository, `BASE_REMOTE="$PR_REMOTE"`, and `GH_HEAD="$BRANCH"`. For a fork, inspect `origin` and `upstream` and honor the user's intended base: use the base repository for `GH_REPO` and its remote for `BASE_REMOTE`, push only to the selected source remote, and use `GH_HEAD="<source-owner>:$BRANCH"` when creating the PR. Do not create a fork automatically. If no usable base remote exists, obtain its target ref before inspecting the diff. If `gh` cannot address a particular fork (such as an organization-owned head), explain the limitation instead of publishing to another repository.
 
 ## Existing PR and default branch
 
 ```bash
-gh pr list --repo "$GH_REPO" --head "$BRANCH" --state open --limit 100 \
+gh-auth pr list --repo "$GH_REPO" --head "$BRANCH" --state open --limit 100 \
   --json number,url,title,body,baseRefName,headRefName,headRepository,headRepositoryOwner,isDraft,reviewRequests
 ```
 
@@ -26,7 +26,7 @@ The list command's `--head` takes the branch alone, not `owner:branch`. Filter i
 When the base remote's default branch is unavailable locally:
 
 ```bash
-gh repo view "$GH_REPO" --json defaultBranchRef --jq '.defaultBranchRef.name'
+gh-auth repo view "$GH_REPO" --json defaultBranchRef --jq '.defaultBranchRef.name'
 ```
 
 ## Draft title and description
@@ -43,7 +43,7 @@ gh repo view "$GH_REPO" --json defaultBranchRef --jq '.defaultBranchRef.name'
 Create after the approved push:
 
 ```bash
-gh pr create --repo "$GH_REPO" --head "$GH_HEAD" --base "$TARGET_BRANCH" \
+gh-auth pr create --repo "$GH_REPO" --head "$GH_HEAD" --base "$TARGET_BRANCH" \
   --title "$PR_TITLE" --body-file "$PR_BODY_FILE"
 ```
 
@@ -52,25 +52,25 @@ Add `--draft` for a draft and repeat `--reviewer <login-or-team>` only for reque
 Update the selected PR:
 
 ```bash
-gh pr edit "$PR_ID" --repo "$GH_REPO" \
+gh-auth pr edit "$PR_ID" --repo "$GH_REPO" \
   --title "$PR_TITLE" --body-file "$PR_BODY_FILE"
 ```
 
 Add `--base "$TARGET_BRANCH"` only for a requested target change. Use `--add-reviewer` for requested additions and `--remove-reviewer` only for explicit removals; do not clear existing requests by default.
 
-`gh pr edit` has no draft flag. Only for an authorized draft-state change, use:
+`gh-auth pr edit` has no draft flag. Only for an authorized draft-state change, use:
 
 ```bash
 # Ready for review → draft
-gh pr ready "$PR_ID" --repo "$GH_REPO" --undo
+gh-auth pr ready "$PR_ID" --repo "$GH_REPO" --undo
 # Draft → ready for review
-gh pr ready "$PR_ID" --repo "$GH_REPO"
+gh-auth pr ready "$PR_ID" --repo "$GH_REPO"
 ```
 
 Run only the applicable transition. Verify the final result:
 
 ```bash
-gh pr view "$PR_ID" --repo "$GH_REPO" \
+gh-auth pr view "$PR_ID" --repo "$GH_REPO" \
   --json number,url,title,body,baseRefName,headRefName,headRepository,headRepositoryOwner,isDraft,reviewRequests
 ```
 

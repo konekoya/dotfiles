@@ -153,7 +153,7 @@ Repository-managed skills:
 
 To add a shared skill, create `~/dotfiles/skills/my-skill/SKILL.md` and run `./install.sh`. The installer creates all four per-skill links; no manual links are needed.
 
-`create-pr` replaces `create-azure-pr`. Run `./install.sh` after updating: it links the new skill and removes only old links pointing to this repository, preserving custom skill files and links. GitHub uses `gh auth login`, repository PR templates, and English by default, with no ClickUp prompts or API calls. Azure DevOps keeps its optional existing-task integration and Traditional Chinese description default; explicit user and repository instructions take precedence.
+`create-pr` replaces `create-azure-pr`. Run `./install.sh` after updating: it links the new skill and removes only old links pointing to this repository, preserving custom skill files and links. GitHub uses `gh-auth` (a configured `GITHUB_TOKEN`, else your `gh auth login`), repository PR templates, and English by default, with no ClickUp prompts or API calls. Azure DevOps keeps its optional existing-task integration and Traditional Chinese description default; explicit user and repository instructions take precedence.
 
 `create-pr` also scores each PR's review risk (rubric in `skills/create-pr/references/risk-assessment.md`): per-dimension ratings roll up by maximum into an overall rating shown as colour, word and score (🟢 Low 1/3, 🟡 Medium 2/3, 🔴 High 3/3, or ⚪ None 0/3) with the review action for it; a high rating adds a rollback statement. The result is a marked block at the end of the PR description, replaced on every update, with a manual test checklist of the checks and reviews the owner must tick (ticks are kept across updates when the checked behavior and its files are unchanged, even if only the format or wording changed, and are never set by the skill). It is advisory only: it never blocks a PR, never changes reviewers, and adds no labels or statuses.
 
@@ -356,6 +356,17 @@ remote-tracking refs and never changes your working tree.
 ```sh
 doctor
 ```
+
+### `gh-auth`
+
+Runs the GitHub CLI with the `GITHUB_TOKEN` from `alias/.env` for that one process, so GitHub skills authenticate the same way Azure DevOps ones do. The token is loaded on demand, passed to `gh` as `GH_TOKEN` only inside that process, and never exported into your shell or placed in arguments. A non-empty `GH_TOKEN` or `GITHUB_TOKEN` you exported yourself wins; with no token configured, `gh` uses its own `gh auth login` credentials.
+
+```sh
+gh-auth pr list --repo OWNER/REPO
+gh-auth --check
+```
+
+`--check` runs `gh auth status` and prints one status line (never raw `gh` output or a token), exiting `0` when authenticated, `10` when no credential exists, `11` when the configured one is invalid or expired (it is not silently replaced by the `gh` login), `12` when a sandbox or network restriction blocked the check (the credential was not tested; approve the command outside the sandbox instead of re-authenticating), and `13` when `gh` is not installed. Agent skills (`create-pr`, `merge-pr`, `sync-work-notes`, `orca-issue-workspace`) call `gh-auth` instead of bare `gh`.
 
 ### `ado-rest`
 
@@ -671,7 +682,7 @@ and on cancellation or interruption.
 | `jq` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`; optional PR lookup in `repo` | `brew install jq` |
 | `curl` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`; optional PR lookup in `repo` | usually pre-installed |
 | `az` | Azure DevOps profiles configured with `auth = azure-cli` | `brew install --cask azure-cli` |
-| `gh` | GitHub mode of `create-pr`; optional GitHub auth for `repo` | `brew install gh` |
+| `gh` | `gh-auth` and the GitHub skills; optional GitHub auth for `repo` | `brew install gh` |
 | `starship` | shared prompt (`zsh/starship.toml`); needs a Nerd Font, falls back to the oh-my-zsh theme without it | `brew install starship` |
 | `shellcheck` | lint of `install.sh`, `scripts/*`, `lib/*.sh`, and `tests/*.sh` in CI and before committing shell changes (see `AGENTS.md`) | `brew install shellcheck` |
 | `magick` | `image-shrink`; includes `libheif` for HEIC/HEIF input and output | `brew install imagemagick` |
@@ -827,11 +838,11 @@ Migration: if you relied on `alias/.env` to export other variables into your she
 | `AZURE_DEVOPS_PAT` | Legacy single-organization REST setup | No — use only with matching `AZURE_DEVOPS_ORG` |
 | `AZURE_DEVOPS_ORG` | Legacy single-org setup; explicit organization for `pr` outside a repository | No — must match a repository remote and never overrides it |
 | `AZURE_DEVOPS_PROFILE` | `pr` outside a repository | No — selects a profile whose organization is configured in Git config |
-| `GITHUB_TOKEN` | Optional GitHub PR lookup in `repo` | No — `repo` falls back to `gh auth token` |
+| `GITHUB_TOKEN` | `gh-auth` (GitHub skills), and PR lookup in `repo` | No — both fall back to your `gh auth login` credentials |
 | `GIT_WORK_NAME` | `config-git` | Needed with `GIT_WORK_EMAIL` when configuring a repository |
 | `GIT_WORK_EMAIL` | `config-git` | Needed with `GIT_WORK_NAME` when configuring a repository |
 
-GitHub mode of `create-pr` uses `gh`, which authenticates through `gh auth login` or its own `GH_TOKEN`/`GITHUB_TOKEN` environment variables; it does not read `alias/.env`.
+GitHub skills run `gh` through `gh-auth`, which loads `GITHUB_TOKEN` from `alias/.env` (or the caller's `GH_TOKEN`/`GITHUB_TOKEN`) for that process only and otherwise relies on `gh auth login`.
 
 Run `doctor` to check whether the ClickUp token and optional work Git identity are configured; it never prints their values. `config-git` applies the identity only to the current repository.
 
