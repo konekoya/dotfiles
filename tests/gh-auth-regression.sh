@@ -39,6 +39,11 @@ if [ "$1 $2" = "auth status" ]; then
     missing) echo "You are not logged into any GitHub hosts. To log in, run: gh auth login" >&2; exit 1 ;;
     invalid) echo "X Failed to log in to github.com account (GH_TOKEN): The token in GH_TOKEN is invalid." >&2; exit 1 ;;
     sandbox) echo "error connecting to api.github.com: dial tcp: lookup api.github.com: no such host" >&2; exit 1 ;;
+    codex-dns) echo "X Failed to log in to github.com account (GH_TOKEN): failed to make HTTP request: Get https://api.github.com/: dial tcp: lookup api.github.com: no such host" >&2; exit 1 ;;
+    curl-dns) echo "curl: (6) Could not resolve host: api.github.com" >&2; exit 1 ;;
+    tls) echo "Get https://api.github.com/: x509: certificate signed by unknown authority" >&2; exit 1 ;;
+    network) echo "Failed to connect to api.github.com port 443: Could not connect to server" >&2; exit 1 ;;
+    ambiguous-login) echo "X Failed to log in to github.com account (GH_TOKEN)" >&2; exit 1 ;;
     denied) echo "open /Users/x/.config/gh/hosts.yml: operation not permitted" >&2; exit 1 ;;
     other) echo "something unexpected" >&2; exit 1 ;;
   esac
@@ -94,7 +99,12 @@ check ok 0 'ok (source: gh-login)'
 check missing 10 missing
 check invalid 11 invalid
 check sandbox 12 blocked
+check codex-dns 12 blocked
+check curl-dns 12 blocked
+check tls 12 blocked
+check network 12 blocked
 check denied 12 blocked
+check ambiguous-login 1 unknown
 check other 1 unknown
 
 echo 'export GITHUB_TOKEN="synthetic-dotenv-token"' > "$ENV_FILE"

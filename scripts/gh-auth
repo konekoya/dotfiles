@@ -67,11 +67,11 @@ lowered="$(printf '%s' "$output" | tr '[:upper:]' '[:lower:]')"
 unset output
 
 # Sandbox and network restrictions come first: they say nothing about the credential itself.
-if printf '%s' "$lowered" | grep -Eq 'operation not permitted|permission denied|sandbox|error connecting|dial tcp|no such host|could not resolve|network is unreachable|connection refused|timed out|timeout'; then
+if printf '%s' "$lowered" | grep -Eq 'operation not permitted|permission denied|sandbox|error connecting|dial tcp|no such host|could not resolve|temporary failure in name resolution|name or service not known|nodename nor servname provided|lookup [^[:space:]]+|network is unreachable|connection refused|connection reset|connection timed out|failed to connect|could not connect|unable to connect|could not establish connection|timed out|timeout|x509:|certificate verify failed|certificate signed by unknown authority|ssl certificate problem|tls.{0,30}(handshake|connect|certificate|error|failed)|ssl.{0,30}(handshake|connect|certificate|error|failed)'; then
   echo "gh-auth: blocked (sandbox or network restriction; the credential was not checked)"
   exit "$EX_BLOCKED"
 fi
-if printf '%s' "$lowered" | grep -Eq 'bad credentials|http 401|is invalid|has expired|revoked|failed to log in'; then
+if printf '%s' "$lowered" | grep -Eq 'bad credentials|http 401|token.{0,40}(invalid|expired|revoked)|(invalid|expired|revoked).{0,40}token'; then
   echo "gh-auth: invalid (source: $source_name); replace the token or run gh auth login"
   exit "$EX_INVALID"
 fi
