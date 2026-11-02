@@ -19,9 +19,9 @@ Rate each dimension `0` (not touched), `1` Low, `2` Medium, or `3` High. A trigg
 
 ## Overall level
 
-`overall = max(dimension ratings)`, then apply modifiers in order, keeping the result within 0–3:
+`overall = max(dimension ratings)`, then apply modifiers in order, keeping the result within 0–3. The test gap modifier can raise the overall rating only to 2; an overall rating of 3 requires at least one dimension rated 3:
 
-- **Test gap, +1**: non-test source changed with no test changed. Reuse the classification from `summarize-pr` (test paths versus recognized source extensions). Skip this when the max is already 3.
+- **Test gap, +1**: non-test source changed with no test changed. Reuse the classification from `summarize-pr` (test paths versus recognized source extensions). Do not apply this when the diff only changes layout, markup structure, styles, copy, or translations, with no logic change.
 - **Mechanical, −1**: only lockfile, generated code, pure rename or move, or formatting changes, verified from the diff. Never apply this to a dimension rated 3.
 
 Use the max, not an average: one severe risk must not be diluted by many quiet dimensions.
@@ -78,15 +78,13 @@ Wrap the section in markers so later runs and other skills can find and replace 
 ```markdown
 <!-- risk-assessment:start -->
 ## Risk Assessment
-**Overall risk: 🔴 High (3/3)**: domain-expert review and a hands-on walkthrough; confirm the rollback before merging · scored at `abc1234`
+**Overall risk: 🟡 Medium (2/3)**: focused review of the listed files; exercise the listed behavior by hand · scored at `abc1234`
 
 - Security 🟡 Medium (2/3): `auth/guard.ts:40-80` reads the role from the request without validating it.
 - UI regression 🟡 Medium (2/3): shared `Button` styles change on the main screens.
-- Modifier: +1 test gap (source changed, no tests changed), so 2 becomes 3.
+- Modifier: +1 test gap (source changed, no tests changed); capped at 2.
 
 No risk found: data, API, blast radius, business logic, performance, ops.
-
-Rollback: revert this PR and redeploy the previous version.
 
 ### Manual test checklist
 #### Security
@@ -104,15 +102,13 @@ The Chinese form of the same block:
 ```markdown
 <!-- risk-assessment:start -->
 ## 風險評估
-**整體風險：🔴 高（3/3）**：需熟悉該領域的人審查並實際操作，合併前確認回復方式 · scored at `abc1234`
+**整體風險：🟡 中（2/3）**：重點審查列出的檔案，並實際操作列出的行為 · scored at `abc1234`
 
 - 資安 🟡 中（2/3）：`auth/guard.ts:40-80` 未驗證即讀取請求中的角色。
 - UI 迴歸 🟡 中（2/3）：共用 `Button` 樣式變更，影響主要畫面。
-- 調整：+1 缺少測試（程式碼有變更，但沒有測試變更），由 2 升為 3。
+- 調整：+1 缺少測試（程式碼有變更，但沒有測試變更），上限為 2。
 
 未發現風險：資料、API、影響範圍、業務邏輯、效能、維運。
-
-回復方式：還原此 PR 並重新部署前一版。
 
 ### 手動測試清單
 #### 資安
