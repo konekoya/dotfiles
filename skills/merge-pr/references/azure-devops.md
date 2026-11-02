@@ -5,10 +5,10 @@ Use the installed `ado-rest` command for every request; run `ado-rest context` f
 ## Readiness
 
 ```bash
-ado-rest GET "/_apis/git/repositories/${REPO}/pullrequests/${PR_ID}?api-version=7.1" > "$PR_JSON_FILE"
+ado-rest GET "/_apis/git/repositories/${REPO}/pullrequests/${PR_ID}?api-version=7.1" | tr -d '\000-\037' > "$PR_JSON_FILE"
 jq '{status, isDraft, mergeStatus, title, head: .lastMergeSourceCommit.commitId, merge: .lastMergeCommit.commitId, votes: [.reviewers[]? | {n: .displayName, v: .vote}]}' "$PR_JSON_FILE"
 ado-rest GET "/_apis/build/builds?branchName=refs/pull/${PR_ID}/merge&\$top=4&queryOrder=queueTimeDescending&api-version=7.1" \
-  | jq -r '.value[] | "\(.id) \(.definition.name) \(.status) \(.result // "-") \(.sourceVersion[0:8])"'
+  | tr -d '\000-\037' | jq -r '.value[] | "\(.id) \(.definition.name) \(.status) \(.result // "-") \(.sourceVersion[0:8])"'
 ```
 
 The checklist is read from `description` in `$PR_JSON_FILE` as described in the shared procedure. Ready means `status` `active`, not draft, `mergeStatus` `succeeded`, required approvals (vote 10 or 5), and the newest build of every pipeline succeeded with `sourceVersion` equal to the PR's `lastMergeCommit`.
@@ -40,13 +40,28 @@ ado-rest PATCH "/_apis/git/repositories/${REPO}/pullrequests/${PR_ID}?api-versio
   AID=$(python3 -I -c 'import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=""))' \
     "vstfs:///CodeReview/CodeReviewId/${PROJECT_ID}/${PR_ID}")
   ado-rest GET "/_apis/policy/evaluations?artifactId=${AID}&api-version=7.1-preview.1" \
-    | jq -r '.value[] | "\(.evaluationId) \(.configuration.type.displayName) \(.status) expired=\(.context.isExpired // "-")"'
+    | tr -d '\000-\037' | jq -r '.value[] | "\(.evaluationId) \(.configuration.type.displayName) \(.status) expired=\(.context.isExpired // "-")"'
   ado-rest PATCH "/_apis/policy/evaluations/${EVALUATION_ID}?api-version=7.1-preview.1" '{}'
   ```
 
   Requeue each expired build evaluation, wait for the new builds to succeed on the new merge commit, then merge again. Other rejected policies need the user.
 
-Build step logs, when needed, come from `/_apis/build/builds/<id>/logs/<logId>?api-version=7.1&$format=json` (`.value[]` holds the lines).
+After each preceding merge, inspect and requeue expired evaluations as above before attempting the next PR. Poll the PR and builds, comparing every required pipeline's newest build `sourceVersion` with the current `lastMergeCommit` (which can change while waiting):
+
+```bash
+set -o pipefail
+while :; do
+  PR_JSON=$(ado-rest GET "/_apis/git/repositories/${REPO}/pullrequests/${PR_ID}?api-version=7.1" | tr -d '\000-\037') || break
+  MERGE_SHA=$(printf '%s' "$PR_JSON" | jq -er '.lastMergeCommit.commitId // empty') || break
+  ado-rest GET "/_apis/build/builds?branchName=refs/pull/${PR_ID}/merge&\$top=50&queryOrder=queueTimeDescending&api-version=7.1" \
+    | tr -d '\000-\037' | jq -r '.value[] | "\(.id) \(.definition.name) \(.status) \(.result // "-") \(.sourceVersion)"' || break
+  printf 'Current merge commit: %s\n' "$MERGE_SHA"
+  # Inspect the results; interrupt once every required pipeline's newest build succeeded on MERGE_SHA, or on failure.
+  sleep 30
+done
+```
+
+Fetch further build pages if needed to identify every required pipeline. Re-fetch readiness, policies and the PR immediately before merging. Stop polling on failures or errors; do not merge until all requirements pass. Build step logs come from `/_apis/build/builds/<id>/logs/<logId>?api-version=7.1&$format=json` (`.value[]` holds the lines). Read the failing test name and message, fix the interaction in the PR's branch, push normally, and wait again.
 
 ## ClickUp close-out
 
