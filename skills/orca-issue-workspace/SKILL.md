@@ -82,6 +82,7 @@ orca agent launch --agent <agent> --worktree issue:<N> \
 
 - `--effort` requires `--model`. Use the model and effort chosen by the owner or the routing guide; if a launch rejects the id, list the options with the agent's own help rather than guessing a different model.
 - Check it actually started: `orca terminal read --terminal <handle from the result> --screen --limit 30`.
+- For a task from a tracker with statuses, move it to the in-progress status after launch; ask the owner once if several statuses fit.
 
 **What the prompt must contain** (adapt, do not omit the rules):
 
@@ -110,10 +111,16 @@ orca terminal send --terminal <handle> --enter --wait-submit 5 --json \
 
 ## 5. Monitor and review
 
+List terminals with `orca terminal list --worktree path:<worktree>` and choose the one whose title or preview shows the agent session. Confirm it with `orca terminal read --terminal <handle> --screen --limit 20` before waiting on that handle.
+
 ```bash
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 600000
 orca terminal read --terminal <handle> --screen --limit 60     # bounded reads only
 ```
+
+Run the `tui-idle` wait loop as a background command of the host tool so the lead is notified. Do not append `&` inside a foreground command; that does not notify the lead.
+
+If the Codex TUI shows “Queued follow-up inputs”, open the question with `orca terminal send --terminal <handle> --text $'\x1b[1;2D'` (no `--enter`), read the screen, then submit the default with `orca terminal send --terminal <handle> --text $'\r'` and read again. Answer only what the owner already authorized; otherwise ask the owner.
 
 - **Idle does not mean done.** A stage-1 plan also leaves the agent idle; read what it produced. Do not assume a push or a PR happened: check `gh-auth pr list --head <branch>`.
 - `ListAgents`/`SendMessage` may not show Orca terminals (Codex tabs often do not appear). Use the `orca terminal` commands to talk to them.
@@ -128,6 +135,7 @@ while [ "$(git -C <worktree> log -1 --format=%s)" != "<expected commit subject>"
 done
 ```
 - Review the real diff, not the summary: confirm only allowed files changed, the content matches the brief, nothing private was added, and required checks ran. Review authorization boundaries, forbidden writes, error paths and risky tests. Re-run the project checks yourself in the engineer's worktree before approving a push.
+- If the engineer cannot reach the tracker because of network or token access, it skips tracker backlink and status steps and reports why; after verifying the PR, the lead performs those steps under the owner's authorization.
 - Before pushing to an existing PR branch, re-check that the PR is still open. If it merged, follow the new-branch and cherry-pick procedure above.
 - Reply to the engineer in its own terminal with `orca terminal send --enter`: approve the plan, request changes, or authorize the push. Authorize only what the owner already authorized (for example "push the feature branch and open the PR"; never `main`, never force-push, never merge).
 - Merging and deploying are the owner's call. Squash-merge only on an explicit instruction, guarded with `--match-head-commit <sha>`; then comment on and close the issue only if the owner asked.
@@ -143,6 +151,7 @@ After authorized work is pushed, close the agent's terminals with `orca terminal
 | New workspace shows as "1 child" under `main` | Created from the primary directory without `--no-parent`: `orca worktree set --worktree issue:<N> --no-parent` |
 | Issue links to the wrong design page | Link lacked the page fragment; edit the issue body |
 | Peer is not in `ListAgents` | It is an Orca terminal agent; use `orca terminal list/read/send` |
+| Terminal wait returns immediately or never reports agent activity | A plain shell was selected; identify and confirm the agent terminal before waiting |
 | Prompt submitted half-written | Newlines in `--text`; send one paragraph, or launch with `--prompt "$(cat file)"` |
 | "Done" in the sidebar but no PR | It may only have finished the plan stage; read the terminal and check `gh-auth pr list` |
 | `--effort` rejected | It requires `--model` |

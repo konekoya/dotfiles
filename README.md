@@ -145,6 +145,7 @@ Repository-managed skills:
 | `implement-spec` | Implement a spec while maintaining `implementation-notes.html` |
 | `learn-quiz` | Teach a topic in stages and check understanding with quizzes |
 | `orca-issue-workspace` | Dispatch tasks or GitHub issues to an engineer in an Orca worktree and lead review and delivery |
+| `research-prompt` | Write a read-only investigation prompt for an agent in another codebase and verify its findings |
 | `skill-creator` | Create, update, and evaluate shared agent skills (GitHub Copilot CLI and Codex only) |
 | `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals, current checks, and the manual test checklist (unticked items block the merge unless the user waives them), then close out ClickUp (Azure DevOps) and worktrees |
 | `squash-git-commits` | Squash feature-branch commits into one relative to the selected PR or repository target branch |

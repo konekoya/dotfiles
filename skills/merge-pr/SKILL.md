@@ -49,7 +49,9 @@ TREE=$(git merge-tree --write-tree "$BASE" "origin/$BRANCH") || echo "conflict"
 BASE=$(git commit-tree "${TREE%%$'\n'*}" -p "$BASE" -m simulated)
 ```
 
-Merge small, independent PRs first and the PR with the widest shared-file footprint last. Stop and report on any conflict. After each merge, the remaining PRs' checks may become stale; re-run step 1 for the next PR before merging it.
+Merge small, independent PRs first and the PR with the widest shared-file footprint last when they merge cleanly. If B conflicts after A, choose the PR to merge first that lets the others merge cleanly, and report the conflict; have the conflicting PR's engineer rebase it, re-check it, and re-push it. After a force-push, re-check approvals: repositories differ in whether they reset them.
+
+After each merge, re-run step 1 for the next PR. Required builds can expire when the target moves: requeue expired evaluations and wait for successful builds on the new merge commit, following the provider reference. PRs green alone can fail on the combined result; read the failing test name and message from the build log, fix it in that PR's own branch, push normally, and wait for checks again.
 
 ## 3. Merge
 
