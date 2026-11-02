@@ -69,6 +69,13 @@ organization mismatch and must not let `AZURE_DEVOPS_ORG` redirect a remote.
 Agent skills should use the installed `ado-rest` command for Azure DevOps REST
 requests rather than invoking `az repos` or constructing authenticated curl calls.
 
+### GitHub CLI
+
+Agent skills run `gh` through `scripts/gh-auth`, which loads `GITHUB_TOKEN` with `local_env_load` and
+exposes it as `GH_TOKEN` only to that process, falling back to the `gh` login when none is configured.
+`gh-auth --check` classifies missing, invalid, and sandbox-blocked states without printing `gh` output.
+Skills should not call bare `gh` or `gh auth status`.
+
 ### `skills/`
 
 The canonical source for manually maintained, repository-owned skills. A skill is a directory containing `SKILL.md`. `install.sh` links each skill individually into the real tool directories `~/.claude/skills/`, `~/.copilot/skills/`, and `~/.agents/skills/`. Claude-managed `~/.claude/skills/synced/` is runtime data outside the repository; do not treat it as a repository skill or add tool-managed runtime files to Git.

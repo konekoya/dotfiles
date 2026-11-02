@@ -26,7 +26,7 @@ else
 fi
 ```
 
-- On a notes branch: keep working on it (its PR is still open or not yet created). If `origin/main` has commits the branch lacks, tell the user and ask before rebasing; check with `gh pr list --head "$BRANCH" --state all` whether its PR was already merged, and if so ask whether to start a fresh branch from `origin/main`.
+- On a notes branch: keep working on it (its PR is still open or not yet created). If `origin/main` has commits the branch lacks, tell the user and ask before rebasing; check with `gh-auth pr list --head "$BRANCH" --state all` whether its PR was already merged, and if so ask whether to start a fresh branch from `origin/main`.
 
 - Missing: tell the user to set `WORK_NOTES_REPO` in `alias/.env` and run `install.sh`; stop.
 - Pull failed: show `git -C "$NOTES_DIR" status --short` and stop. Do not resolve conflicts in notes without asking, and never force-push.
@@ -66,10 +66,10 @@ Before pushing, list anything you are unsure about (where an entry belongs, word
 
 ```bash
 if git -C "$NOTES_DIR" push --quiet -u origin HEAD >/dev/null 2>&1; then echo "push ok"; else echo "push failed"; fi
-(cd "$NOTES_DIR" && gh pr view --json url -q .url 2>/dev/null || gh pr create --base main --fill)
+(cd "$NOTES_DIR" && gh-auth pr view --json url -q .url 2>/dev/null || gh-auth pr create --base main --fill)
 ```
 
-`gh pr create --fill` uses the commit messages; give it `--title`/`--body` when the branch has several commits. Do not merge the PR, approve it, or enable auto-merge; the user reviews and merges it. No AI attribution or co-author trailers. If nothing changed, say so and skip the commit. If the push fails, leave the commit in place and report it; `doctor` will show it as unpushed.
+`gh-auth pr create --fill` uses the commit messages; give it `--title`/`--body` when the branch has several commits. Do not merge the PR, approve it, or enable auto-merge; the user reviews and merges it. No AI attribution or co-author trailers. If nothing changed, say so and skip the commit. If the push fails, leave the commit in place and report it; `doctor` will show it as unpushed.
 
 ## 5. Report
 

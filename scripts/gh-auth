@@ -1,0 +1,84 @@
+#!/bin/bash
+# Description: Run the GitHub CLI with GITHUB_TOKEN from alias/.env for that process only, or check auth
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../lib/local-env.sh"
+
+# Exit codes of --check.
+EX_MISSING=10
+EX_INVALID=11
+EX_BLOCKED=12
+EX_NO_GH=13
+
+usage() {
+  echo "Usage: gh-auth --check | gh-auth <gh arguments...>" >&2
+}
+
+if [ "$#" -lt 1 ]; then
+  usage
+  exit 2
+fi
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "gh-auth: gh-missing (brew install gh)" >&2
+  exit "$EX_NO_GH"
+fi
+
+# A caller-provided GH_TOKEN wins, then GITHUB_TOKEN (environment or alias/.env). With neither,
+# gh falls back to its own stored login. The token is exported only into the gh process below.
+local_env_load GITHUB_TOKEN
+if [ -n "${GH_TOKEN:-}" ]; then
+  source_name=GH_TOKEN
+elif [ -n "${GITHUB_TOKEN:-}" ]; then
+  source_name=GITHUB_TOKEN
+else
+  source_name=gh-login
+fi
+
+# Run gh in a subshell so the exported token never reaches the caller's environment.
+run_gh() {
+  (
+    if [ "$source_name" = GITHUB_TOKEN ]; then
+      GH_TOKEN="$GITHUB_TOKEN"
+      export GH_TOKEN
+    fi
+    exec gh "$@"
+  )
+}
+
+if [ "$1" != --check ]; then
+  run_gh "$@"
+  exit
+fi
+
+[ "$#" -eq 1 ] || { usage; exit 2; }
+
+# The output is classified here and never printed: it is untrusted and may hold account details.
+rc=0
+output="$(run_gh auth status --active --hostname github.com 2>&1)" || rc=$?
+if [ "$rc" -eq 0 ]; then
+  echo "gh-auth: ok (source: $source_name)"
+  exit 0
+fi
+
+lowered="$(printf '%s' "$output" | tr '[:upper:]' '[:lower:]')"
+unset output
+
+# Sandbox and network restrictions come first: they say nothing about the credential itself.
+if printf '%s' "$lowered" | grep -Eq 'operation not permitted|permission denied|sandbox|error connecting|dial tcp|no such host|could not resolve|temporary failure in name resolution|name or service not known|nodename nor servname provided|lookup [^[:space:]]+|network is unreachable|connection refused|connection reset|connection timed out|failed to connect|could not connect|unable to connect|could not establish connection|timed out|timeout|x509:|certificate verify failed|certificate signed by unknown authority|ssl certificate problem|tls.{0,30}(handshake|connect|certificate|error|failed)|ssl.{0,30}(handshake|connect|certificate|error|failed)'; then
+  echo "gh-auth: blocked (sandbox or network restriction; the credential was not checked)"
+  exit "$EX_BLOCKED"
+fi
+if printf '%s' "$lowered" | grep -Eq 'bad credentials|http 401|token.{0,40}(invalid|expired|revoked)|(invalid|expired|revoked).{0,40}token'; then
+  echo "gh-auth: invalid (source: $source_name); replace the token or run gh auth login"
+  exit "$EX_INVALID"
+fi
+if printf '%s' "$lowered" | grep -Eq 'not logged in|no accounts|gh auth login'; then
+  echo "gh-auth: missing; set GITHUB_TOKEN in alias/.env or run gh auth login --hostname github.com"
+  exit "$EX_MISSING"
+fi
+
+echo "gh-auth: unknown failure; run gh auth status yourself to inspect it"
+exit 1

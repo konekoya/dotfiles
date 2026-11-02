@@ -1,21 +1,21 @@
 # GitHub merge operations
 
-Use the GitHub CLI (`gh`); Azure tooling and ClickUp are unnecessary. Check `gh auth status --active --hostname github.com`; on failure suggest `gh auth login --hostname github.com` and never print tokens. Parse `GH_REPO` as `OWNER/REPO` from the selected remote and pass `--repo "$GH_REPO"` to every command.
+Use the GitHub CLI through the `gh-auth` wrapper (it passes `GITHUB_TOKEN` from `alias/.env` to that one process and otherwise uses the `gh` login); Azure tooling and ClickUp are unnecessary. Run `gh-auth --check` first and stop on a non-zero exit: `gh-auth --check` exits 0 when authenticated (`GH_TOKEN`, `GITHUB_TOKEN` from the environment or `alias/.env`, or the `gh auth login` fallback); 10 when no credential exists (suggest setting `GITHUB_TOKEN` in `alias/.env` or `gh auth login --hostname github.com`); 11 when a configured credential is invalid or expired (ask the user to replace it; do not fall back silently); 12 when a sandbox or network restriction blocked the check (the credential was not tested: ask the user to approve the command outside the sandbox, do not report a login problem); 13 when `gh` is missing (`brew install gh`). It prints only a status line, never a token. Never print tokens. Parse `GH_REPO` as `OWNER/REPO` from the selected remote and pass `--repo "$GH_REPO"` to every command.
 
 ## Readiness
 
 ```bash
-gh pr view "$PR_ID" --repo "$GH_REPO" \
+gh-auth pr view "$PR_ID" --repo "$GH_REPO" \
   --json number,title,state,isDraft,baseRefName,headRefName,headRefOid,isCrossRepository,mergeable,mergeStateStatus,reviewDecision,body
-gh pr checks "$PR_ID" --repo "$GH_REPO" --required --json name,state,bucket
+gh-auth pr checks "$PR_ID" --repo "$GH_REPO" --required --json name,state,bucket
 ```
 
-`gh pr checks` exits non-zero with `no checks reported` when the branch has no checks; treat that as no required checks, not as a failure.
+`gh-auth pr checks` exits non-zero with `no checks reported` when the branch has no checks; treat that as no required checks, not as a failure.
 
 Read the checklist state from `body` as described in the shared procedure. Ready means `state` `OPEN`, not draft, `mergeable` `MERGEABLE`, `reviewDecision` `APPROVED` (or empty when no review is required), and every required check in bucket `pass`. Read `mergeStateStatus`:
 
 - `CLEAN` or `HAS_HOOKS`: mergeable now.
-- `BEHIND`: branch protection requires the branch to be up to date. With the user's approval, run `gh pr update-branch "$PR_ID" --repo "$GH_REPO"`, wait for the required checks on the new head, then re-check.
+- `BEHIND`: branch protection requires the branch to be up to date. With the user's approval, run `gh-auth pr update-branch "$PR_ID" --repo "$GH_REPO"`, wait for the required checks on the new head, then re-check.
 - `BLOCKED`: a review, check, or rule is missing; report which.
 - `DIRTY`: merge conflict; stop.
 - `UNSTABLE`: only non-required checks fail; report them and ask before merging.
@@ -26,16 +26,16 @@ Read the checklist state from `body` as described in the shared procedure. Ready
 Use the PR title as the subject and its body, minus the `risk-assessment` block, as the merge body (write it to `MERGE_BODY_FILE`), and pin the verified head:
 
 ```bash
-gh pr merge "$PR_ID" --repo "$GH_REPO" --squash \
+gh-auth pr merge "$PR_ID" --repo "$GH_REPO" --squash \
   --match-head-commit "$HEAD_SHA" --subject "$PR_TITLE (#$PR_ID)" --body-file "$MERGE_BODY_FILE"
 ```
 
 - Add `--delete-branch` only when the head branch is not checked out in any local worktree and the PR is not from a fork; otherwise delete the remote branch after close-out with `git push "$PR_REMOTE" --delete "$BRANCH"` (same-repository branches only).
-- If the repository uses a merge queue or auto-merge is required, `gh pr merge --auto` enqueues instead of merging; report that it is queued and re-check later rather than claiming it merged.
+- If the repository uses a merge queue or auto-merge is required, `gh-auth pr merge --auto` enqueues instead of merging; report that it is queued and re-check later rather than claiming it merged.
 - A head-mismatch error means someone pushed after verification; re-run readiness instead of retrying blindly.
 - If squash merging is disabled, ask which allowed strategy to use.
 
-Confirm with `gh pr view "$PR_ID" --repo "$GH_REPO" --json state,mergedAt,mergeCommit` that `state` is `MERGED` and record `mergeCommit.oid`.
+Confirm with `gh-auth pr view "$PR_ID" --repo "$GH_REPO" --json state,mergedAt,mergeCommit` that `state` is `MERGED` and record `mergeCommit.oid`.
 
 ## Close-out
 
