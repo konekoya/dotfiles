@@ -40,14 +40,14 @@ CLI="$TMP/repo/scripts/clickup"
 jq -e '.title == "Sample task" and .id == "abc"' "$TMP/out" >/dev/null
 "$CLI" open --list 123 --assignee me > "$TMP/out"
 [ "$(wc -l < "$TMP/out" | tr -d ' ')" = 1 ]
-rg -q 'First' "$TMP/out"
+grep -q 'First' "$TMP/out"
 "$CLI" snapshot --since 2025-01-01 --list 123 > "$TMP/out"
 [ "$(wc -l < "$TMP/out" | tr -d ' ')" = 2 ]
-rg -q 'Second' "$TMP/out"
+grep -q 'Second' "$TMP/out"
 if "$CLI" status abc REVIEW > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 3 ]; fi
 [ ! -e "$TMP/write" ]
 printf 'hello\nworld\n' | "$CLI" comment abc -
 jq -e '.comment_text == "hello\nworld\n"' "$TMP/write" >/dev/null
 if "$CLI" task fail > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 2 ]; fi
-if rg -q 'synthetic_test_credential' "$TMP/args" "$TMP/out"; then echo 'Credential exposed' >&2; exit 1; fi
+if grep -q 'synthetic_test_credential' "$TMP/args" "$TMP/out"; then echo 'Credential exposed' >&2; exit 1; fi
 printf '%s\n' 'clickup regression: passed'
