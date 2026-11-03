@@ -471,8 +471,9 @@ fetch/push remote pair and profile before sending a request.
 
 ### `pr`
 
-Lists and inspects pull requests or opens the current PR. Azure DevOps supports
-all subcommands; GitHub supports `pr open` only.
+Lists, inspects and merges pull requests or opens the current PR. Azure DevOps
+supports all subcommands; GitHub supports `pr open` only (merge GitHub PRs with the
+`merge-pr` skill).
 
 ```sh
 pr                         # same as pr list
@@ -482,6 +483,10 @@ pr status [ID] --watch     # re-check every 20s while builds are pending
 pr status [ID] --interval 10
 pr status [ID] --json      # one read-only JSON snapshot
 pr comments [ID]           # current branch's PR, or a specific PR
+pr merge [ID]              # read-only preview: is the PR ready to squash-merge?
+pr merge [ID] --json       # the same verdict as one JSON object
+pr merge ID --execute --head SHA   # squash-merge, pinned to the previewed head
+pr merge ID --requeue-expired      # requeue expired build evaluations, then preview
 pr open                    # open PR in Chrome, or the repository page
 ```
 
@@ -495,7 +500,62 @@ Every subcommand supports `--help`. `pr status --json` cannot be combined with
 - `checks`: array of build policy snapshots, each with `state` (`failed`,
   `pending`, `succeeded`, or `unknown`) and numeric-or-null `buildId`.
 
-The snapshot contains no URLs or authentication data. Inside a repository, the
+The snapshot contains no URLs or authentication data.
+
+#### `pr merge`
+
+`pr merge [ID]` is a read-only preview: it sends only GET requests and prints a
+verdict, `ready` or `blocked`, with one `❌ <code>: <message>` line per block reason.
+A PR is ready when it is active and not a draft, has no merge conflict, has the
+required approvals (an approving vote of 10 or 5, no reject or wait-for-author vote,
+every required reviewer approving), every required policy and build succeeded on the
+PR's **current** merge commit (a green build on an older commit is `build_stale`),
+and the manual test checklist is clean. The checklist is read from the
+`<!-- risk-assessment:start -->` / `<!-- risk-assessment:end -->` block of the
+description using the markers and the `- [ ]` / `- [x]` boxes only, never an item's
+wording. The command fails closed: a missing or unrecognised API field or policy status
+is `unknown_policy_state`, never ready. The preview exits `0` whenever it prints a
+verdict; errors exit non-zero.
+
+Block codes: `not_active`, `draft`, `conflict`, `merge_status`, `approval_rejected`,
+`approval_missing`, `policy_not_approved`, `build_expired`, `build_pending`,
+`build_failed`, `build_stale`, `build_missing`, `checklist_unticked`,
+`checklist_stale`, `checklist_unreadable`, `message_attribution`,
+`unknown_policy_state`, and `head_mismatch` (from `--execute`).
+
+`pr merge ID --execute --head SHA` performs the merge. It needs an explicit ID and the
+head the preview printed (8 to 40 hex characters). It re-verifies everything,
+refuses with exit `1` and no write when the verdict is not `ready` or the head moved
+(including between its own check and the write), then sends one squash merge pinned to
+that head: the subject is the PR title, the body is the description without the
+risk-assessment block, the source branch is deleted, work items are transitioned, and
+policy is never bypassed. A merge message that carries an AI co-author trailer or
+"generated with" line is blocked, not rewritten. It then polls (`--interval`, default
+5 seconds; `--timeout`, default 300) until the PR is `completed` and prints the merge
+commit. A timeout reports `timeout` and is never reported as merged.
+
+`--waive-checklist` is the owner's decision to merge past `checklist_unticked` and
+`checklist_stale`. It clears nothing else, never ticks or edits a box, and an agent may
+use it only when the owner has said so for that specific PR. `--requeue-expired`
+requeues expired, blocking Build policy evaluations and nothing else (other rejected
+policies are only reported), then prints a fresh preview; it cannot be combined with
+`--execute` and exits `2` if it is.
+
+`pr merge --json` prints one object with the keys `pullRequestId`, `organization`,
+`project`, `repository`, `status`, `isDraft`, `mergeStatus`, `head`, `mergeCommit`
+(full commit ids), `verdict`, `reasons` (`code` and `subject`), `approvals` (counts),
+`policies` (`kind`, `status`, `blocking`), `builds` (`definitionId`, `state`,
+`current`) and `checklist` (`present`, `total`, `ticked`, `unticked`, `unreadable`,
+`scoredAtCurrent`, `untickedBlocking`, `staleBlocking`, `waivedUnticked`,
+`waivedStale`). With `--execute`, `--json` prints `pullRequestId`, `organization`,
+`project`, `repository`, `result` (`completed`, `refused`, `timeout`, `abandoned` or
+`failed`), `reasons`, `head`, `mergeCommit` and `waivedChecklist`. JSON contains no URLs,
+credentials, or API-supplied text. In the text preview, API-supplied strings (checklist
+items, pipeline and policy names, the title) have control characters and ANSI escapes
+removed and `http(s)://` URLs replaced by `[url]`. GitHub remotes report the command as
+unsupported and point to the `merge-pr` skill.
+
+Inside a repository, the
 organization comes from the selected Git remote. Outside a repository, `pr list`
 can use `AZURE_DEVOPS_PROFILE` or the legacy single-org pair `AZURE_DEVOPS_ORG`
 and `AZURE_DEVOPS_PAT`.
