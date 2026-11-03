@@ -96,9 +96,14 @@ if [ "$method" = GET ]; then
 elif [ "$method" = DELETE ] && [ "$#" -eq 2 ]; then
   response="$(http_request -X DELETE -H "$ADO_AUTH_HEADER" "$url")" || exit 1
 else
+  # Work item updates are JSON Patch documents and are rejected with HTTP 400 as application/json.
+  content_type="application/json"
+  case "$lower_path" in
+    /_apis/wit/workitems/*) [ "$method" = PATCH ] && content_type="application/json-patch+json" ;;
+  esac
   response="$(http_request -X "$method" \
     -H "$ADO_AUTH_HEADER" \
-    -H "Content-Type: application/json" \
+    -H "Content-Type: $content_type" \
     "$url" \
     -d "$body")" || exit 1
 fi
