@@ -1,19 +1,43 @@
 #!/bin/bash
 # Description: Interactive menu to browse and run scripts in the scripts directory
 
+usage() {
+  printf '%s\n' 'Usage: cmds [--list | --json | --help]' \
+    '  With no arguments, browse and run scripts interactively.' \
+    '  --list  List command names and descriptions.' \
+    '  --json  List commands as a JSON array.'
+}
+
+mode=interactive
+if (( $# > 0 )); then
+  if (( $# != 1 )); then usage >&2; exit 2; fi
+  case "$1" in
+    --list) mode=list ;;
+    --json) mode=json ;;
+    --help|-h) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+fi
+
 SCRIPTS_DIR="$(dirname "$(realpath "$0")")"
+export LC_ALL=C
 
 # ── collect scripts ──────────────────────────────────────────────────────────
 declare -a scripts names descs
 max_name_len=0
 
 for f in "$SCRIPTS_DIR"/*; do
-  [[ -f "$f" && -x "$f" ]] || continue
-  name="$(basename "$f")"
-  [[ "$name" == "cmds" ]] && continue
+  [[ -f "$f" && -x "$f" && -r "$f" ]] || continue
+  name="${f##*/}"
+  [[ "$name" == "cmds" && "$mode" == interactive ]] && continue
 
-  desc="$(head -10 "$f" | grep -m1 '^# Description: ' | sed 's/^# Description: //')"
-  [[ -z "$desc" ]] && desc="(no description)"
+  # Only the designated metadata line is safe to display; never scan script bodies.
+  desc=""
+  { IFS= read -r _ || :; IFS= read -r desc || :; } < "$f"
+  case "$desc" in '# Description: '*) desc="${desc#\# Description: }" ;; *) desc="" ;; esac
+  [[ -z "$desc" || "$desc" == *[[:cntrl:]]* ]] && desc="(no description)"
+  # Control characters would make the plain-text listing ambiguous.
+  [[ "$name" == *[[:cntrl:]]* ]] && continue
 
   scripts+=("$f")
   names+=("$name")
@@ -21,6 +45,38 @@ for f in "$SCRIPTS_DIR"/*; do
 
   (( ${#name} > max_name_len )) && max_name_len=${#name}
 done
+
+json_string() {
+  local value="$1" char i
+  printf '"'
+  for (( i=0; i<${#value}; i++ )); do
+    char="${value:i:1}"
+    case "$char" in
+      '"') printf '\\"' ;;
+      '\') printf '\\\\' ;;
+      *) printf '%s' "$char" ;;
+    esac
+  done
+  printf '"'
+}
+
+if [[ "$mode" == list ]]; then
+  for i in "${!names[@]}"; do printf '%s\t%s\n' "${names[$i]}" "${descs[$i]}"; done
+  exit 0
+elif [[ "$mode" == json ]]; then
+  printf '['
+  separator=""
+  for i in "${!names[@]}"; do
+    printf '%s{"name":' "$separator"
+    json_string "${names[$i]}"
+    printf ',"description":'
+    json_string "${descs[$i]}"
+    printf '}'
+    separator=,
+  done
+  printf ']\n'
+  exit 0
+fi
 
 if [[ ${#scripts[@]} -eq 0 ]]; then
   echo "No scripts found in $SCRIPTS_DIR"

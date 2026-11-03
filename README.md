@@ -684,11 +684,20 @@ Interactive menu to browse and run any script in the `scripts/` directory.
 
 ```sh
 cmds
+cmds --list
+cmds --json
 ```
 
 Uses `fzf` when available; otherwise it provides an arrow-key Bash menu. `fzf` is optional (`brew install fzf`).
 The Bash menu restores terminal settings and the cursor before launching a script,
 and on cancellation or interruption.
+
+`--list` prints tab-separated names and descriptions; `--json` prints a JSON array
+with `name` and `description` fields. Both list readable executable scripts in
+bytewise name order without running them or requiring a terminal. Descriptions
+come from the second-line `# Description: ` metadata; missing or invalid metadata
+is shown as `(no description)`. Names containing control characters are omitted.
+See [agent tooling](agents/tooling.md) for discovery and integration guidance.
 
 ## Dependencies
 
