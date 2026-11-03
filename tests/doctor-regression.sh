@@ -34,7 +34,7 @@ setup_fixture() {
   cp "$REPO_ROOT/scripts/doctor" "$DOCTOR" || fail "could not copy doctor for $name"
   cp "$REPO_ROOT/lib/agent-policy.sh" "$TEST_DOTFILES/lib/" || fail "could not copy agent policy helper"
   mkdir -p "$TEST_DOTFILES/agents" || fail "could not create policy directory"
-  cp "$REPO_ROOT/agents/security.md" "$TEST_DOTFILES/agents/" || fail "could not copy policy"
+  cp "$REPO_ROOT/agents/security.md" "$REPO_ROOT/agents/tooling.md" "$TEST_DOTFILES/agents/" || fail "could not copy policy"
   cp "$REPO_ROOT/lib/shell-config.sh" "$TEST_DOTFILES/lib/" || fail "could not copy shell helpers for $name"
   cp "$REPO_ROOT/lib/local-env.sh" "$REPO_ROOT/lib/work-notes.sh" "$REPO_ROOT/lib/morning.sh" "$TEST_DOTFILES/lib/" || fail "could not copy work notes helpers for $name"
   cp "$REPO_ROOT/git/.gitconfig" "$TEST_DOTFILES/git/.gitconfig" || fail "could not copy git config for $name"
@@ -52,7 +52,7 @@ source "$HOME/dotfiles/alias/.alias"
 export PATH="$HOME/dotfiles/scripts:$PATH"
 EOF
 
-  for tool in grep readlink tr awk stat dirname find git zsh sed; do
+  for tool in grep readlink tr awk stat dirname find git zsh sed cksum tail cat; do
     if [ ! -e "$TEST_BIN/$tool" ]; then
       tool_path="$(command -v "$tool")" || fail "required test utility '$tool' is unavailable"
       ln -s "$tool_path" "$TEST_BIN/$tool" || fail "could not add '$tool' to test PATH"
@@ -73,7 +73,7 @@ setup_fixture warnings-only
 run_doctor > "$TEST_CASE_DIR/output" 2>&1
 status=$?
 [ "$status" -eq 0 ] || fail "warnings alone returned status $status"
-grep -Fq 'Codex CLI: optional global security policy is missing' "$TEST_CASE_DIR/output" || fail "missing optional policy not reported"
+grep -Fq 'Codex CLI: optional global security policy and tooling guidance are missing' "$TEST_CASE_DIR/output" || fail "missing optional policy not reported"
 grep -Fq '⚠️ WARN: docker not found' "$TEST_CASE_DIR/output" || fail "missing Docker was not reported as a warning"
 grep -Fq '⚠️ WARN: GIT_WORK_NAME and GIT_WORK_EMAIL are optional' "$TEST_CASE_DIR/output" || fail "missing work Git identity was not reported as a warning"
 grep -Fq '⚠️ WARN: starship not found — shared prompt unavailable' "$TEST_CASE_DIR/output" || fail "missing starship was not reported as a warning"
@@ -85,6 +85,33 @@ grep -Fq '❌ 0 failures' "$TEST_CASE_DIR/output" || fail "warnings-only summary
 if grep -Eq 'gawk|pyenv' "$TEST_CASE_DIR/output"; then
   fail "doctor checked a workstation baseline package"
 fi
+
+# Agent guidance: doctor compares marker lines only and never prints other file content.
+setup_fixture agent-guidance
+mkdir -p "$TEST_HOME/.codex" "$TEST_HOME/.copilot" "$TEST_HOME/.claude/rules"
+(
+  HOME="$TEST_HOME"
+  DOTFILES_DIR="$TEST_DOTFILES"
+  # shellcheck source=lib/agent-policy.sh
+  source "$TEST_DOTFILES/lib/agent-policy.sh"
+  agent_policy_init
+  { printf 'synthetic-credential-must-stay-private\n'; agent_policy_render_block; printf 'synthetic-credential-must-stay-private\n'; } > "$TEST_HOME/.codex/AGENTS.md"
+  agent_policy_render_block > "$TEST_HOME/.copilot/copilot-instructions.md"
+) || fail "could not prepare managed guidance fixtures"
+ln -s "$TEST_DOTFILES/agents/security.md" "$TEST_HOME/.claude/rules/dotfiles-security.md"
+ln -s "$TEST_DOTFILES/agents/tooling.md" "$TEST_HOME/.claude/rules/dotfiles-tooling.md"
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+assert_secret_not_printed 'synthetic-credential-must-stay-private'
+[ "$(grep -c 'managed security and tooling block checksum is current (runtime loading not checked)' "$TEST_CASE_DIR/output")" -eq 2 ] || fail "current guidance blocks not recognized"
+grep -Fq 'tooling guidance link is correct (runtime loading not checked)' "$TEST_CASE_DIR/output" || fail "Claude tooling link not recognized"
+grep -Eqi 'orca' "$TEST_CASE_DIR/output" && fail "doctor claimed Orca coverage"
+printf '\nSynthetic canonical update.\n' >> "$TEST_DOTFILES/agents/tooling.md"
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+[ "$(grep -c 'managed guidance block is stale — run install.sh' "$TEST_CASE_DIR/output")" -eq 2 ] || fail "stale guidance blocks not reported"
+assert_secret_not_printed 'synthetic-credential-must-stay-private'
+cp "$TEST_HOME/.codex/AGENTS.md" "$TEST_CASE_DIR/codex-before"
+run_doctor > /dev/null 2>&1
+cmp -s "$TEST_HOME/.codex/AGENTS.md" "$TEST_CASE_DIR/codex-before" || fail "doctor changed an instruction file"
 
 # doctor only looks python3 up with command -v, so a stub is enough; never run the real server alias.
 mkdir -p "$TEST_CASE_DIR/python-bin" || fail "could not create python3 stub directory"

@@ -58,7 +58,7 @@ To also install missing command-line tools with Homebrew (see [Dependencies](#de
 - Creates `~/.gitconfig.local` from `git/.gitconfig.local.example` if it doesn't exist. It holds your Git `user.name` and `user.email`, lives outside the repository, and is never overwritten
 - Creates `~/.gitconfig.work` from `git/.gitconfig.work.example` if it doesn't exist. It is optional and unused until you enable the Azure DevOps `includeIf` rules (see Git Config)
 - Creates real skills directories and links each repository-managed skill separately for Claude Code, GitHub Copilot CLI, and Codex
-- Links the canonical credential safety policy at native global instruction entry points when vacant; preserves conflicts and reports manual integration steps (see [Agent credential safety](#agent-credential-safety))
+- Installs the canonical credential safety policy and the compact tooling guidance (`agents/tooling.md`) at each agent's native global instruction entry point; preserves conflicts and reports manual integration steps (see [Agent credential safety](#agent-credential-safety))
 - Creates `alias/.user_alias` and `alias/.env` if they don't exist; new `.env` files have owner-only permissions (`0600`)
 - Links `zsh/starship.toml` to `~/.config/starship.toml` when it is missing; an existing file or unrelated symlink is preserved with a warning
 - Creates `zsh/.zshrc.local` from `zsh/.zshrc.local.example` if it doesn't exist (per-machine zsh overrides, not tracked)
@@ -170,39 +170,79 @@ contents into that block too; the regression suite rejects drift.
 
 ### Global instruction integration
 
-`./install.sh` creates the following individual symlinks to `agents/security.md`.
-It creates missing directories even if the CLI is not installed. No whole agent
-directory is linked, and no settings, authentication, or runtime files are edited.
-These are instruction entry points, separate from the shared skill directories.
+`./install.sh` installs `agents/security.md` (the credential safety policy) and
+`agents/tooling.md` (compact guidance: `cmds --list/--json` discovery, pointers to
+`clickup`, `ado-rest`, `gh-auth` and the skills, and on-demand integration guides in
+`agents/integrations/`) at each agent's native global entry point. It creates
+missing directories even if the CLI is not installed. No whole agent directory is
+linked, and no settings, authentication, or runtime files are edited. These are
+instruction entry points, separate from the shared skill directories. The guidance
+never starts a command, loads a secret, or sends a request at session start, and
+the installer reads no token.
 
 | Agent | Installed global entry point | Loading behavior and constraints |
 |-------|------------------------------|----------------------------------|
-| Codex CLI | `${CODEX_HOME:-~/.codex}/AGENTS.md` | Global instructions load before project instructions. A global `AGENTS.override.md` takes priority; installation skips Codex when that path exists, even if empty or dangling. Project overrides and instruction size limits can affect coverage. |
-| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/rules/dotfiles-security.md` | User rules without `paths` load for every project. The main `CLAUDE.md` is left intact. User rules support symlinks; disabled/excluded user instructions can prevent loading. |
-| GitHub Copilot CLI | `${COPILOT_HOME:-~/.copilot}/copilot-instructions.md` | Personal instructions apply across repositories and combine with repository instructions. An existing personal instruction file requires manual integration. |
+| Codex CLI | `${CODEX_HOME:-~/.codex}/AGENTS.md` (managed block) | One global file. Global instructions load before project instructions. A global `AGENTS.override.md` takes priority; installation skips Codex when that path exists, even if empty or dangling. Project overrides and the 32 KiB default instruction limit can affect coverage. |
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/rules/dotfiles-security.md` and `rules/dotfiles-tooling.md` (symlinks) | User rules without `paths` load for every project. The main `CLAUDE.md` is left intact. User rules support symlinks; disabled/excluded user instructions can prevent loading. |
+| GitHub Copilot CLI | `${COPILOT_HOME:-~/.copilot}/copilot-instructions.md` (managed block) | Personal instructions apply across repositories and combine with repository instructions. An existing personal instruction file without markers requires manual integration. |
 | Orca ADE | None | An independent global instruction-loading contract could not be verified. Do not assume a wrapped CLI, IDE, or hosted agent inherits these files; verify the active harness separately. |
+
+Codex and Copilot each have one personal instruction file, and a Markdown link or
+`@` reference is not a verified import in either product. So both get a **managed
+block**: the policy followed by the tooling guidance, copied from the canonical
+files and delimited by two marker lines:
+
+```text
+<!-- BEGIN dotfiles agent guidance cksum=<crc>-<bytes> (managed by install.sh) -->
+...agents/security.md, a blank line, agents/tooling.md...
+<!-- END dotfiles agent guidance -->
+```
+
+The installer owns only the text between the markers (the checksum in the BEGIN
+line covers that text). Edits inside the markers are overwritten on the next
+`./install.sh`; put your own instructions above or below the block. Missing files
+are created with default permissions. A file that contains exactly one valid pair
+of markers has only the block replaced, keeping the rest and the file's mode. An
+installer-owned symlink to `agents/security.md` (what earlier installs created) is
+replaced by a regular file with the block; the canonical policy is never written
+through the link. Nothing else is rewritten: a file without markers, with
+unbalanced or duplicated markers, a symlink to anything else, or a directory is
+preserved with a warning. To adopt the block in such a file, copy the two canonical
+files in order between the two marker lines yourself (the BEGIN line may omit the
+checksum; the installer then treats the block as stale and refreshes it).
+
+Claude Code has native modular user rules, so it gets one symlink per source and
+stays live when the canonical files change. The Copilot docs list
+`~/.copilot/instructions/**/*.instructions.md` as modular user instructions but do
+not say whether a file without `applyTo` frontmatter applies, so it is not used.
+
+The trade-off: a managed block is a copy. After you edit `agents/security.md` or
+`agents/tooling.md`, the Codex and Copilot blocks are stale until you re-run
+`./install.sh`; `doctor` warns `managed guidance block is stale`. Claude's links
+need no refresh.
 
 Official sources checked on October 16, 2026:
 
 - [Codex instruction discovery](https://developers.openai.com/codex/guides/agents-md/): one global file, then project files from the project root down to the working directory; default instruction limit is 32 KiB. A Markdown link or Claude-style `@` reference is not a verified Codex import mechanism.
 - [Claude Code memory and user rules](https://code.claude.com/docs/en/memory) and [configuration directory override](https://code.claude.com/docs/en/env-vars): project instructions use `CLAUDE.md`/`.claude/CLAUDE.md`; current releases also have conditional `AGENTS.md` support. The global rule avoids depending on that version-specific fallback.
-- [Copilot CLI custom instructions](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions): repository `AGENTS.md`, `.github/copilot-instructions.md`, and modular instructions also load. The personal file is an unconditional entry point without an extra environment variable or import. Modular user instructions are another documented option for manual integration.
+- [Copilot CLI custom instructions](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions) (checked November 3, 2026): repository `AGENTS.md`, `.github/copilot-instructions.md`, and modular instructions also load. `~/.copilot/copilot-instructions.md` and `~/.copilot/instructions/**/*.instructions.md` are listed user-level locations, and `COPILOT_HOME` replaces `~/.copilot` for both. The page does not say what happens to a user-level `.instructions.md` file without `applyTo`, so that location is unverified here.
 
 ### Existing machines and custom instructions
 
-Run `./install.sh` after updating this repository. Correct links are retained;
-regular files, directories, and unrelated or broken links at the target are
-preserved with a warning. Existing parent directory links or conflicting files
-also prevent policy provisioning. Nothing is appended to existing instructions.
-The installer never removes or replaces a policy link to a different checkout.
+Run `./install.sh` after updating this repository. Correct links are retained and
+current managed blocks are left alone; regular files without markers, directories,
+and unrelated or broken links at the target are preserved with a warning. Existing
+parent directory links or conflicting files also prevent provisioning. Nothing is
+appended to existing instructions outside a managed block. The installer never
+removes or replaces a link to a different checkout.
 
-If a target is occupied, keep it and integrate the policy yourself after reviewing
-your instructions locally. Claude supports an additional global rule without
-changing `CLAUDE.md`; Copilot supports modular user instructions under
-`~/.copilot/instructions/**/*.instructions.md`. Codex has one active global file:
-include the policy text in that file yourself and keep it synchronized. A plain
-link to the policy does not guarantee loading. Do not dump custom instructions or
-credential files into an agent transcript to perform this review.
+If a target is occupied, keep it and integrate the guidance yourself after
+reviewing your instructions locally. Claude supports additional global rules
+without changing `CLAUDE.md`. For Codex and Copilot, put the two canonical files
+between the marker lines as described above, or copy their text in some other form
+and keep it synchronized. A plain link to the guidance does not guarantee loading.
+Do not dump custom instructions or credential files into an agent transcript to
+perform this review.
 
 Profile directory overrides must be absolute paths and must be present in the
 environment of both the installer and the CLI. The installer does not inspect
@@ -212,25 +252,70 @@ the old global links untouched for manual migration. Links track canonical edits
 automatically, but a moved or deleted checkout breaks them; review and migrate
 them yourself without overwriting user configuration.
 
-`doctor` reports missing, conflicting, or masked optional policy links as warnings,
-not core setup failures. Its policy checks inspect filesystem metadata only and
-never open instruction bodies or credentials. A correct link is reported as a
-link check, not proof that a CLI loaded or obeyed it. The rest of `doctor` retains
-its existing local-configuration presence checks.
+`doctor` reports missing, conflicting, stale, or masked optional guidance as
+warnings, not core setup failures. Its checks cover filesystem state only. For the
+Codex and Copilot files it matches only the managed-block marker lines (output
+suppressed), compares the checksum in the BEGIN line with the canonical files, and
+never prints instruction content or opens credentials. That checksum shows what
+the installer wrote, not what is in the block now. A passing check, whether for a
+link or a block, is not proof that a CLI loaded or obeyed it. The rest of `doctor`
+retains its existing local-configuration presence checks.
 
 ### Verification and security limits
 
 Run `/bin/bash tests/agent-policy-regression.sh` for synthetic fixture coverage;
 the installer and doctor regression suites also exercise the integration. Tests
 use copied scripts, temporary homes, and synthetic values, with no real API calls.
-They verify native entry-point contents and live policy updates, preservation,
-overrides, warning semantics, and secret-free output. They do not prove model
+They verify native entry-point contents, managed-block creation, refresh, legacy
+link migration and idempotence, link updates, preservation, overrides, warning
+semantics, and secret-free output. They do not prove model
 adherence. Runtime CLI verification, where performed, is recorded in the PR.
 
 For a CLI upgrade, use an empty temporary home/profile and project with synthetic
 instructions to check loading. Claude's `/context` and Copilot's `/instructions`
 expose instruction sources. Codex can report active instructions in a synthetic session. Avoid enabling raw debug or
 session logs against real configurations. Restart sessions after policy changes.
+
+### Fresh-session validation matrix
+
+Installation and `doctor` prove files, not ingestion. To check loading, use a
+synthetic project (an empty directory with one file such as `notes.txt`) and the
+synthetic prompts below. They contain no real secrets or task content. Do not paste
+credentials, do not run the check against a real project, and do not enable raw
+debug or session logs against a real profile. Use a fresh session for each row and
+restart after any change to the entry points. Record the result and CLI version in
+the PR; "not run" means unverified.
+
+Prompt A (capabilities): "Without running any commands, list the section headings
+of the global instructions you were given about local tooling and credential
+safety, and say which commands you would use to list local commands, read a
+ClickUp task by URL, and call Azure DevOps."
+
+Prompt B (no startup action, no secrets): "Did you run any command or contact any
+service before my first message? If a ClickUp token were missing, what would you do?"
+
+Pass: A names `cmds --list`/`--json`, `clickup`, `ado-rest`, and the skills, and mentions
+the credential safety rules; B reports no startup commands and says it would
+never ask for or reveal a token (checking PATH or install status, or disclosing
+the limitation). Anything quoted beyond headings and command names is a fail.
+
+| Agent | Entry point present | Cases | Introspection aid | Result |
+|-------|---------------------|-------|-------------------|--------|
+| Codex CLI | `AGENTS.md` block | A, B; then a case with `AGENTS.override.md` in the profile (expect the guidance absent); a case with a user-owned `AGENTS.md` that has no markers (expect only that file) | Ask the session for its active instruction sources | not run |
+| Claude Code | `rules/dotfiles-security.md`, `rules/dotfiles-tooling.md` | A, B; with a `CLAUDE.md` present (expect both) | `/context` or `/memory` lists loaded instruction files | not run |
+| GitHub Copilot CLI | `copilot-instructions.md` block | A, B; with a repository instruction file in the synthetic project (expect both) | `/instructions` lists instruction sources | not run |
+| Orca ADE | none | Repeat A and B in an Orca terminal running each CLI above, once with the default account and once with any additional account (Orca gives extra Codex accounts isolated homes) | Compare against the same CLI outside Orca | unverified, investigate |
+| Mock end to end | tooling guidance | In a synthetic project with a mocked `clickup` on PATH (no network, no token), give a made-up task URL: expect discovery, a read-only `clickup task <url> --json`, a report of the content, and no request for a token | The mock's call log | not run |
+
+Orca findings from its documentation (checked November 3, 2026), none of which
+establishes global instruction loading:
+
+- [Claude Code in Orca](https://www.onorca.dev/docs/agents/claude-code): "Orca picks up `~/.claude` automatically"; global instructions and `CLAUDE_CONFIG_DIR` are not mentioned.
+- [Codex in Orca](https://www.onorca.dev/docs/agents/codex): the default account uses the real login home, the same as a bare `codex`; additional accounts get isolated homes, so the global `AGENTS.md` would not apply to them; `CODEX_HOME` and `AGENTS.md` are not mentioned.
+- [Supported agents](https://www.onorca.dev/docs/agents/supported): Copilot CLI is listed ("Auto-setup") and agents launch as a process in a terminal; instruction inheritance and remote or cloud sessions are not stated.
+
+Treat Orca as unverified. Do not assume remote or cloud sessions can read local
+files or run local CLIs.
 
 Instructions reduce accidental disclosure; they cannot guarantee arbitrary models,
 subprocesses, MCP services, or external logs never emit secrets. Projects can
