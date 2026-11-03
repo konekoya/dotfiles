@@ -153,6 +153,7 @@ def clean:
     | gsub("https?://[^\\s]*"; "[url]"; "i")
     | .[0:200]
   else "" end;
+def plain: clean | gsub("\\*\\*"; "") | gsub("`"; "");
 def r($code; $subject; $msg): {code: $code, subject: $subject, message: $msg};
 def unk($f): r("unknown_policy_state"; $f; "\($f) is missing or unrecognised.");
 def hex40: type == "string" and test("^[0-9a-fA-F]{40}$");
@@ -365,8 +366,8 @@ def dedupe: reduce .[] as $x ([]; if any(.[]; .code == $x.code and .subject == $
          else ["Checklist: \($ck.ticked)/\($ck.ticked + $unticked) ticked"
                + (if $unticked == 0 then " (checklist complete)" else "" end)]
               + ($ck.items | map("  ☐ [\(.heading)] \(.text)"))
-              + (if $ratingRaw != null then ["  " + ($ratingRaw | clean)] else [] end)
-              + (if $rollbackRaw != null then ["  " + ($rollbackRaw | clean)] else [] end)
+              + (if $ratingRaw != null then ["  " + ($ratingRaw | plain)] else [] end)
+              + (if $rollbackRaw != null then ["  " + ($rollbackRaw | plain)] else [] end)
          end)
     )
   }
