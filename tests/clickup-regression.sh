@@ -32,7 +32,9 @@ esac
 case "$url" in *'/docs/fail/'*) printf '{}\n404'; exit ;; esac
 if [ "$method" != GET ]; then
   printf '%s' "$body" > "$MOCK_DIR/write"
-  if [ "$method" = POST ]; then printf '{"id":"new-page"}\n201'; else printf '{}\n200'; fi
+  if [ "$method" = POST ]; then printf '{"id":"new-page"}\n201'
+  elif [ "$method" = PUT ] && [[ "$url" == */api/v3/* ]]; then printf '\n200'
+  else printf '{}\n200'; fi
   exit
 fi
 case "$url" in

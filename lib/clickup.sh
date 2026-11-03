@@ -64,5 +64,7 @@ clickup_doc_update() {
   local body
   body="$(jq -n --arg content "$4" --arg title "$5" --argjson has_title "$6" \
     '{content:$content, content_format:"text/md", content_edit_mode:"replace"} + (if $has_title then {name:$title} else {} end)')" || return 1
-  clickup_request -X PUT -H 'Content-Type: application/json' -d "$body" "https://api.clickup.com/api/v3/workspaces/$1/docs/$2/pages/$3" >/dev/null
+  # ClickUp answers a successful page edit with an empty body, so only the HTTP status counts.
+  http_request -H "Authorization: ${CLICKUP_API_TOKEN}" -X PUT -H 'Content-Type: application/json' -d "$body" \
+    "https://api.clickup.com/api/v3/workspaces/$1/docs/$2/pages/$3" >/dev/null
 }
