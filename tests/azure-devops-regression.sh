@@ -28,6 +28,15 @@ mkdir -p "$BASE_BIN" "$AZ_BIN" "$SCRIPT_BIN" "$TEST_ROOT/no-git" || exit 1
 # Keep caller credentials out of every fixture invocation; all auth below is synthetic.
 unset AZURE_DEVOPS_ORG AZURE_DEVOPS_PROFILE AZURE_DEVOPS_PAT AZURE_DEVOPS_PAT_WORK AZURE_DEVOPS_PAT_PERSONAL AZURE_DEVOPS_PAT_WORK_PROD
 
+# Isolate Git from the developer's configuration: a user-level includeIf for Azure DevOps
+# remotes would add azure-devops.* values that the fixtures then see as ambiguous.
+ISOLATED_HOME="$TEST_ROOT/home"
+mkdir -p "$ISOLATED_HOME/.config" || exit 1
+: > "$TEST_ROOT/empty-gitconfig"
+export HOME="$ISOLATED_HOME" XDG_CONFIG_HOME="$ISOLATED_HOME/.config"
+export GIT_CONFIG_GLOBAL="$TEST_ROOT/empty-gitconfig" GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
+unset GIT_DIR GIT_WORK_TREE GIT_CONFIG GIT_CONFIG_COUNT
+
 # Scripts locate alias/.env from their own path. Run copies inside a fixture so the
 # developer's real alias/.env is never read; tests that need one write FIXTURE_ENV.
 FIXTURE_DOTFILES="$TEST_ROOT/dotfiles"
@@ -317,6 +326,17 @@ assert_equal context-project "$ADO_PROJECT" "SSH context project"
 assert_equal context-repo "$ADO_REPO" "SSH context repository"
 assert_equal 'git@ssh.dev.azure.com:v3/context-org/context-project/context-repo' "$ADO_REMOTE_URL" "SSH context remote"
 assert_equal work "$ADO_PROFILE" "selected work profile"
+
+# Prove the isolation: a decoy user-level includeIf is ignored by the fixture.
+cat > "$TEST_ROOT/decoy-work.gitconfig" <<'DECOY'
+[azure-devops "work"]
+	organization = decoy-org
+DECOY
+decoy_pattern='hasconfig:remote.*.url:git@ssh.dev.azure.com:*/**'
+printf '[includeIf "%s"]\n\tpath = %s\n' "$decoy_pattern" "$TEST_ROOT/decoy-work.gitconfig" > "$TEST_ROOT/decoy-global.gitconfig"
+assert_equal 1 "$("$REAL_GIT" -C "$SSH_REPO" config --get-all azure-devops.work.organization | wc -l | tr -d ' ')" "isolated Git sees one organization value"
+GIT_CONFIG_GLOBAL="$TEST_ROOT/decoy-global.gitconfig" "$REAL_GIT" -C "$SSH_REPO" config --get-all azure-devops.work.organization | grep -q decoy-org \
+  || fail "decoy includeIf did not apply, so the isolation check is vacuous"
 
 HTTPS_REPO="$(make_repo https-context 'https://dev.azure.com/https-org/https-project/_git/https-repo')"
 "$REAL_GIT" -C "$HTTPS_REPO" config azure-devops.personal.organization https-org
