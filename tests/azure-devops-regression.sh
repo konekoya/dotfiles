@@ -156,6 +156,7 @@ cat > "$SCRIPT_BIN/curl" <<'EOF'
 
 auth_header=""
 auth_header_arg=""
+content_type=""
 url=""
 method=GET
 connect_timeout=""
@@ -172,6 +173,7 @@ while [ $# -gt 0 ]; do
           auth_header="$(cat "$auth_path")"
           ;;
         Authorization:*) auth_header="$1" ;;
+        Content-Type:*) content_type="$1" ;;
       esac
       ;;
     --connect-timeout) shift; connect_timeout="$1" ;;
@@ -197,6 +199,9 @@ if [ -n "${ADO_TEST_CURL_AUTH_ARG_FILE:-}" ]; then
 fi
 if [ -n "${ADO_TEST_CURL_METHOD_FILE:-}" ]; then
   printf '%s\n' "$method" > "$ADO_TEST_CURL_METHOD_FILE"
+fi
+if [ -n "${ADO_TEST_CURL_CONTENT_TYPE_FILE:-}" ]; then
+  printf '%s\n' "$content_type" > "$ADO_TEST_CURL_CONTENT_TYPE_FILE"
 fi
 if [ -n "${ADO_TEST_CURL_URLS_FILE:-}" ]; then
   printf '%s\n' "$url" >> "$ADO_TEST_CURL_URLS_FILE"
@@ -516,6 +521,7 @@ cd "$SCRIPT_REPO" || fail "could not enter valid consumer repository"
 export ADO_TEST_CURL_HEADER_FILE="$SCRIPT_HEADER_FILE"
 export ADO_TEST_CURL_AUTH_ARG_FILE="$SCRIPT_AUTH_ARG_FILE"
 export ADO_TEST_CURL_METHOD_FILE="$SCRIPT_METHOD_FILE"
+export ADO_TEST_CURL_CONTENT_TYPE_FILE="$TEST_ROOT/curl-content-type"
 export ADO_TEST_CURL_URLS_FILE="$SCRIPT_URLS_FILE"
 export ADO_TEST_AZ_CALLED_FILE="$TEST_ROOT/script-az-was-called"
 rm -f "$SCRIPT_HEADER_FILE" "$SCRIPT_AUTH_ARG_FILE" "$SCRIPT_URLS_FILE" "$ADO_TEST_AZ_CALLED_FILE"
@@ -542,6 +548,10 @@ fi
 if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" POST '/_apis/test' 'not-json' > /dev/null 2>&1; then
   fail "ado-rest accepted an invalid JSON body"
 fi
+PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" PATCH '/_apis/wit/workitems/123?api-version=7.1' '[{"op":"add","path":"/fields/System.Tags","value":"Synthetic"}]' > /dev/null || fail "ado-rest work item PATCH failed"
+assert_equal 'Content-Type: application/json-patch+json' "$(cat "$ADO_TEST_CURL_CONTENT_TYPE_FILE")" "ado-rest work item PATCH content type"
+PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" PATCH '/_apis/git/repositories/script-repo/pullrequests/123?api-version=7.1' '{"title":"Synthetic"}' > /dev/null || fail "ado-rest PR PATCH failed"
+assert_equal 'Content-Type: application/json' "$(cat "$ADO_TEST_CURL_CONTENT_TYPE_FILE")" "ado-rest non-work-item PATCH content type"
 export ADO_TEST_CURL_MODE=empty-success
 PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" DELETE '/_apis/git/repositories/script-repo/pullrequests/123?api-version=7.1' > /dev/null || fail "ado-rest rejected a successful empty response"
 assert_equal DELETE "$(cat "$SCRIPT_METHOD_FILE")" "ado-rest DELETE method"
