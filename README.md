@@ -449,7 +449,7 @@ Supports SSH and HTTPS remotes, including legacy Azure DevOps `visualstudio.com`
 
 ### `clickup`
 
-Read and update ClickUp tasks without interactive prompts. Requires `jq`, `curl`,
+Read and update ClickUp tasks and Docs without interactive prompts. Requires `jq`, `curl`,
  and `CLICKUP_API_TOKEN` loaded on demand from the environment or `alias/.env`.
 
 ```sh
@@ -459,7 +459,15 @@ clickup comment example123 ./comment.txt
 printf 'A comment\n' | clickup comment example123 -
 clickup open --list 12345 --assignee me
 clickup snapshot --since 2026-01-01 --list 12345
+clickup doc pages doc123
+clickup doc page-create doc123 "Notes" ./notes.md --parent page123
+clickup doc page-update doc123 page123 ./notes.md --title "Updated notes"
 ```
+
+Doc commands also require `CLICKUP_WORKSPACE_ID` from the environment or
+`alias/.env`. They list a Doc's page tree, create Markdown pages or subpages,
+and replace page content; use `-` to read content from stdin. Page creation
+prints the new ID and a reminder to add attachments in the ClickUp UI.
 
 Task IDs can also be full task URLs. Status names are matched case-insensitively
 against the task's list; unknown or ambiguous names leave the task unchanged.
@@ -858,6 +866,7 @@ Migration: if you relied on `alias/.env` to export other variables into your she
 | Variable | Used by | Required? |
 |-------|---------|-----------|
 | `CLICKUP_API_TOKEN` | `clickup`, `submit-pr`, `create-clickup-task`, Azure DevOps mode of `create-pr` | Required for `clickup`; other integrations can skip ClickUp if unset |
+| `CLICKUP_WORKSPACE_ID` | `clickup doc` subcommands | Required only for `clickup doc` |
 | `AZURE_DEVOPS_PAT_<PROFILE>` | Azure DevOps REST calls for the selected Git config profile; for example `AZURE_DEVOPS_PAT_WORK_COMPANY_A` | Required for a `pat` profile |
 | `AZURE_DEVOPS_PAT` | Legacy single-organization REST setup | No — use only with matching `AZURE_DEVOPS_ORG` |
 | `AZURE_DEVOPS_ORG` | Legacy single-org setup; explicit organization for `pr` outside a repository | No — must match a repository remote and never overrides it |

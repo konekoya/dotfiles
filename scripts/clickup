@@ -1,5 +1,5 @@
 #!/bin/bash
-# Description: View and update ClickUp tasks non-interactively
+# Description: View and update ClickUp tasks and Docs non-interactively
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/local-env.sh
@@ -15,6 +15,9 @@ Usage: clickup task <id|url> [--json]
        clickup comment <id|url> <file|->
        clickup open [--list <id>]... [--assignee me]
        clickup snapshot --since <YYYY-MM-DD> [--list <id>]...
+       clickup doc pages <doc-id>
+       clickup doc page-create <doc-id> <title> <file.md|-> [--parent <page-id>]
+       clickup doc page-update <doc-id> <page-id> <file.md|-> [--title <title>]
 USAGE
 }
 fail_usage() { usage >&2; exit 1; }
@@ -30,9 +33,37 @@ task_id() {
 }
 [ "$#" -gt 0 ] || fail_usage
 command="$1"; shift
-case "$command" in --help|-h) [ "$#" -eq 0 ] || fail_usage; usage; exit 0 ;; task|status|comment|open|snapshot) ;; *) fail_usage ;; esac
+case "$command" in --help|-h) [ "$#" -eq 0 ] || fail_usage; usage; exit 0 ;; task|status|comment|open|snapshot|doc) ;; *) fail_usage ;; esac
 id=''; json=false; since=''; assignee=''; lists=()
 case "$command" in
+  doc)
+    [ "$#" -ge 1 ] || fail_usage
+    doc_command="$1"; shift
+    parent=''; title=''; has_title=false
+    case "$doc_command" in
+      pages) [ "$#" -eq 1 ] || fail_usage; doc_id="$1" ;;
+      page-create)
+        [ "$#" -eq 3 ] || [ "$#" -eq 5 ] || fail_usage
+        doc_id="$1"; title="$2"; content_file="$3"
+        [ -n "$title" ] || fail_usage
+        if [ "$#" -eq 5 ]; then [ "$4" = --parent ] && valid_id "$5" || fail_usage; parent="$5"; fi ;;
+      page-update)
+        [ "$#" -eq 3 ] || [ "$#" -eq 5 ] || fail_usage
+        doc_id="$1"; page_id="$2"; content_file="$3"
+        valid_id "$page_id" || fail_usage
+        if [ "$#" -eq 5 ]; then [ "$4" = --title ] && [ -n "$5" ] || fail_usage; title="$5"; has_title=true; fi ;;
+      *) fail_usage ;;
+    esac
+    valid_id "$doc_id" || fail_usage
+    if [ "$doc_command" != pages ]; then
+      if [ "$content_file" = - ]; then content="$(cat; printf '.')"; else
+        [ -f "$content_file" ] && [ -r "$content_file" ] || fail_usage
+        content="$(cat "$content_file"; printf '.')" || fail_usage
+      fi
+      content="${content%.}"
+    fi
+    local_env_load CLICKUP_WORKSPACE_ID
+    valid_id "${CLICKUP_WORKSPACE_ID:-}" || { echo 'Set a valid CLICKUP_WORKSPACE_ID.' >&2; exit 1; } ;;
   task) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail_usage; id="$(task_id "$1")" || fail_usage; shift; if [ "$#" -gt 0 ]; then [ "$1" = --json ] || fail_usage; json=true; fi ;;
   status|comment) [ "$#" -eq 2 ] || fail_usage; id="$(task_id "$1")" || fail_usage; value="$2" ;;
   open|snapshot)
@@ -62,6 +93,22 @@ local_env_load CLICKUP_API_TOKEN
 [ -n "${CLICKUP_API_TOKEN:-}" ] || api_error
 export -n CLICKUP_API_TOKEN
 case "$command" in
+  doc)
+    case "$doc_command" in
+      pages)
+        pages="$(clickup_doc_pages "$CLICKUP_WORKSPACE_ID" "$doc_id")" || api_error
+        printf '%s' "$pages" | jq -r '
+          def valid: type == "object" and (.id | type == "string") and (.name | type == "string") and ((.pages // []) | type == "array" and all(.[]; valid));
+          if all(.[]; valid) then . else error("invalid page tree") end |
+          def tree($depth): .[] | ("  " * $depth + .id + " | " + .name), ((.pages // []) | tree($depth + 1));
+          tree(0)' || api_error ;;
+      page-create)
+        page="$(clickup_doc_create "$CLICKUP_WORKSPACE_ID" "$doc_id" "$title" "$content" "$parent")" || api_error
+        page_id="$(printf '%s' "$page" | jq -er '.id | select(type == "string" and length > 0)')" || api_error
+        valid_id "$page_id" || api_error
+        printf '%s\n' "$page_id" 'Files cannot be attached through the API; add them in the ClickUp UI.' ;;
+      page-update) clickup_doc_update "$CLICKUP_WORKSPACE_ID" "$doc_id" "$page_id" "$content" "$title" "$has_title" || api_error ;;
+    esac ;;
   task)
     task="$(clickup_task "$id")" || api_error
     if ! printf '%s' "$task" | jq -e '.id and .name and .status.status and .list.name and .url' >/dev/null 2>&1; then api_error; fi

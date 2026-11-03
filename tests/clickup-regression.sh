@@ -19,8 +19,15 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
-if [ "$method" != GET ]; then printf '%s' "$body" > "$MOCK_DIR/write"; printf '{}\n200'; exit; fi
+printf '%s %s\n' "$method" "$url" >> "$MOCK_DIR/requests"
+case "$url" in *'/docs/fail/'*) printf '{}\n404'; exit ;; esac
+if [ "$method" != GET ]; then
+  printf '%s' "$body" > "$MOCK_DIR/write"
+  if [ "$method" = POST ]; then printf '{"id":"new-page"}\n201'; else printf '{}\n200'; fi
+  exit
+fi
 case "$url" in
+  *'/docs/doc-1/page_listing?max_page_depth=-1') printf '[{"id":"p1","name":"Root","pages":[{"id":"p2","name":"Child"}]}]\n200' ;;
   */task/fail) printf '{}\n404' ;;
   */task/abc) printf '{"id":"abc","name":"Sample\001 task","status":{"status":"Open"},"list":{"id":"123","name":"Example"},"url":"https://example.invalid/t/abc"}\n200' ;;
   */list/123) printf '{"name":"Example","statuses":[{"status":"Open","type":"open"},{"status":"Done","type":"closed"},{"status":"Review","type":"custom"},{"status":"review","type":"custom"}]}\n200' ;;
@@ -49,5 +56,46 @@ if "$CLI" status abc REVIEW > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 3 ]; f
 printf 'hello\nworld\n' | "$CLI" comment abc -
 jq -e '.comment_text == "hello\nworld\n"' "$TMP/write" >/dev/null
 if "$CLI" task fail > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 2 ]; fi
+if grep -q 'synthetic_test_credential' "$TMP/args" "$TMP/out"; then echo 'Credential exposed' >&2; exit 1; fi
+export CLICKUP_WORKSPACE_ID=123
+"$CLI" doc pages doc-1 > "$TMP/out"
+printf 'p1 | Root\n  p2 | Child\n' > "$TMP/expected"
+cmp "$TMP/expected" "$TMP/out"
+grep -Fq 'GET https://api.clickup.com/api/v3/workspaces/123/docs/doc-1/page_listing?max_page_depth=-1' "$TMP/requests"
+printf 'first\nsecond\n' > "$TMP/content.md"
+"$CLI" doc page-create doc-1 'New page' "$TMP/content.md" --parent p1 > "$TMP/out"
+jq -e '.name == "New page" and .content == "first\nsecond\n" and .content_format == "text/md" and .parent_page_id == "p1"' "$TMP/write" >/dev/null
+grep -q '^new-page$' "$TMP/out"
+grep -q 'ClickUp UI' "$TMP/out"
+grep -Fq 'POST https://api.clickup.com/api/v3/workspaces/123/docs/doc-1/pages' "$TMP/requests"
+printf 'stdin\n' | "$CLI" doc page-create doc-1 Title - > "$TMP/out"
+jq -e '.content == "stdin\n" and (has("parent_page_id") | not)' "$TMP/write" >/dev/null
+printf 'replacement\n' | "$CLI" doc page-update doc-1 p1 - --title Renamed
+jq -e '.content == "replacement\n" and .name == "Renamed" and .content_edit_mode == "replace" and .content_format == "text/md"' "$TMP/write" >/dev/null
+grep -Fq 'PUT https://api.clickup.com/api/v3/workspaces/123/docs/doc-1/pages/p1' "$TMP/requests"
+"$CLI" doc page-update doc-1 p1 "$TMP/content.md"
+jq -e '.content == "first\nsecond\n" and (has("name") | not)' "$TMP/write" >/dev/null
+for operation in pages page-create page-update; do
+  case "$operation" in
+    pages) args=(fail) ;;
+    page-create) args=(fail Title "$TMP/content.md") ;;
+    page-update) args=(fail p1 "$TMP/content.md") ;;
+  esac
+  if "$CLI" doc "$operation" "${args[@]}" > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 2 ]; fi
+done
+request_count="$(wc -l < "$TMP/requests")"
+for operation in pages page-create page-update; do
+  case "$operation" in
+    pages) args=('bad/id') ;;
+    page-create) args=(doc-1 Title "$TMP/content.md" --parent 'bad/id') ;;
+    page-update) args=(doc-1 'bad/id' "$TMP/content.md") ;;
+  esac
+  if "$CLI" doc "$operation" "${args[@]}" > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
+done
+[ "$(wc -l < "$TMP/requests")" = "$request_count" ]
+if CLICKUP_WORKSPACE_ID='bad/id' "$CLI" doc pages doc-1 > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
+if "$CLI" doc page-create doc-1 > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
+if "$CLI" doc page-update doc-1 p1 "$TMP/content.md" --append yes > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
+[ "$(wc -l < "$TMP/requests")" = "$request_count" ]
 if grep -q 'synthetic_test_credential' "$TMP/args" "$TMP/out"; then echo 'Credential exposed' >&2; exit 1; fi
 printf '%s\n' 'clickup regression: passed'
