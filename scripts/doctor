@@ -451,6 +451,11 @@ fi
 
 if has_local_value CLICKUP_API_TOKEN; then
   check_pass "ClickUp API token is configured"
+  if has_local_value CLICKUP_WORKSPACE_ID; then
+    check_pass "ClickUp workspace id is configured for clickup doc"
+  else
+    check_pass "ClickUp workspace id is not set; clickup doc looks it up only when the token has exactly one workspace"
+  fi
 else
   check_warn "ClickUp integration is not configured; submit-pr and create-clickup-task can run without ClickUp"
 fi

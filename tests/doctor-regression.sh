@@ -374,6 +374,7 @@ status=$?
 [ "$status" -eq 0 ] || fail "values loaded from .env returned status $status"
 grep -Fq 'PASS: Work Git identity is configured for config-git' "$TEST_CASE_DIR/output" || fail "configured .env work identity was not reported as PASS"
 grep -Fq 'PASS: ClickUp API token is configured' "$TEST_CASE_DIR/output" || fail "configured .env ClickUp token was not reported as PASS"
+grep -Fq 'PASS: ClickUp workspace id is not set' "$TEST_CASE_DIR/output" || fail "missing ClickUp workspace was not reported"
 assert_secret_not_printed file-name-secret
 assert_secret_not_printed file-email-secret
 assert_secret_not_printed file-clickup-secret
@@ -414,6 +415,7 @@ run_doctor \
   GIT_WORK_NAME=environment-name-secret \
   GIT_WORK_EMAIL=environment-email-secret \
   CLICKUP_API_TOKEN=environment-clickup-secret \
+  CLICKUP_WORKSPACE_ID=environment-workspace \
   WORK_NOTES_REPO=environment-notes-secret \
   WORK_NOTES_DIR="$TEST_HOME/work-notes" \
   MORNING_REPOS="$TEST_HOME/code/sample-project" \
@@ -423,6 +425,7 @@ status=$?
 [ ! -e "$SOURCE_MARKER" ] || fail "doctor sourced .env despite all values being present in the environment"
 grep -Fq 'PASS: Work Git identity is configured for config-git' "$TEST_CASE_DIR/output" || fail "environment work identity was not reported as PASS"
 grep -Fq 'PASS: ClickUp API token is configured' "$TEST_CASE_DIR/output" || fail "environment ClickUp token was not reported as PASS"
+grep -Fq 'PASS: ClickUp workspace id is configured for clickup doc' "$TEST_CASE_DIR/output" || fail "environment ClickUp workspace was not reported as PASS"
 assert_secret_not_printed environment-name-secret
 assert_secret_not_printed environment-email-secret
 assert_secret_not_printed environment-clickup-secret
