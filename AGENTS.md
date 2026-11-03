@@ -86,7 +86,9 @@ When renaming a repository skill, update its callers and documentation, and migr
 
 ### `agents/`
 
-`agents/security.md` is the canonical global credential policy. The marked block above is an exact mirror so repository instruction loading needs no implicit import. Update both together; `tests/agent-policy-regression.sh` checks equality. `lib/agent-policy.sh` shares native target metadata and preservation checks between the installer and doctor. Global policy diagnostics inspect filesystem metadata only; missing optional coverage is a warning.
+`agents/security.md` is the canonical global credential policy and `agents/tooling.md` the compact global tooling guidance. The marked block above is an exact mirror of the policy so repository instruction loading needs no implicit import. Update both together; `tests/agent-policy-regression.sh` checks equality. Do not assume a Markdown link or `@` import is ingested by any agent: `tooling.md` uses plain paths, and provider entry points point at the canonical files rather than carrying their own copies of integration knowledge.
+
+`lib/agent-policy.sh` shares native target metadata and preservation checks between the installer and doctor. Claude Code gets one symlink per source. Codex and Copilot have a single personal instruction file, so each gets a managed block (security, then tooling) between `<!-- BEGIN dotfiles agent guidance cksum=... -->` and `<!-- END dotfiles agent guidance -->`. The installer owns only that text, keeps everything else in the file and its mode, replaces only its own legacy symlink to the policy, and warns instead of rewriting unmarked, malformed, linked, or masked (`AGENTS.override.md`) targets. Doctor reads only the managed-block marker lines (output suppressed), compares the BEGIN-line checksum, never prints content, and never claims runtime loading; missing optional coverage is a warning. Orca has no entry point and no support claim until verified.
 
 ### Work notes
 

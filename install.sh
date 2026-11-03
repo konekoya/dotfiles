@@ -389,7 +389,8 @@ retire_kiro_links() {
 
 retire_kiro_links
 
-# Direct native instruction entry points; no edits to existing user instructions.
+# Native global instruction entry points for the security policy and tooling
+# guidance. Existing user instructions are never edited outside the managed block.
 install_agent_policy
 
 # Homebrew packages: opt-in because installs are slow and change the system.
