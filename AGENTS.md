@@ -56,6 +56,10 @@ Standalone Bash utilities, primarily for macOS. Keep scripts small and executabl
 
 Small shared Bash helpers used by scripts, including `local-env.sh`, the on-demand loader for `alias/.env`, and `morning.sh`, which parses `MORNING_REPOS` for `morning`, `install.sh`, and `doctor`. Keep command-specific behavior in `scripts/` and avoid turning `lib/` into a general framework.
 
+The `pr-*.sh` files are a narrow exception: `scripts/pr` sources these command
+implementations so the deprecated PR entrypoints can remain thin forwarding
+shims. Keep them specific to the `pr` command.
+
 `azure-devops.sh` resolves a selected fetch/push remote pair and binds Azure DevOps
 requests to a per-repository profile. `http.sh` passes authorization headers through
 a private pipe to curl without writing a header file. Never reintroduce auth values
