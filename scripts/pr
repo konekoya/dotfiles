@@ -1,5 +1,5 @@
 #!/bin/bash
-# Description: List and inspect pull requests or open the current PR
+# Description: List, inspect and merge pull requests or open the current PR
 
 set -euo pipefail
 
@@ -28,6 +28,7 @@ Commands:
   list                         List active Azure DevOps PRs
   status [ID] [options]        Show CI/build status for a PR
   comments [ID]                Show comment threads for a PR
+  merge [ID] [options]         Preview a squash merge; --execute performs it
   open                         Open the current PR or repository page
 
 Run 'pr <command> --help' for command options.
@@ -36,7 +37,7 @@ EOF
 
 unsupported_github() {
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && ado_resolve_remote_context && [ "$ADO_REMOTE_PROVIDER" = github ]; then
-    echo "❌ Selected Git remote is not a recognized Azure DevOps remote. This pr subcommand is unsupported for GitHub remotes." >&2
+    echo "❌ Selected Git remote is not a recognized Azure DevOps remote. This pr subcommand is unsupported for GitHub remotes.${1:+ $1}" >&2
     exit 1
   fi
 }
@@ -95,6 +96,31 @@ EOF
     source "$PR_ROOT/lib/azure-devops.sh"
     unsupported_github
     source "$PR_ROOT/lib/pr-comments.sh"
+    ;;
+  merge)
+    case " $* " in
+      *" --help "*|*" -h "*)
+        cat <<'EOF'
+Usage: pr merge [ID] [--json] [--waive-checklist]
+       pr merge ID --requeue-expired
+       pr merge ID --execute --head SHA [--waive-checklist] [--interval SECONDS] [--timeout SECONDS] [--json]
+
+Default: read-only preview of whether the PR can be squash-merged (sends no write).
+  --json              Preview (or --execute result) as one JSON object.
+  --execute           Squash-merge the PR, pinned to --head; never bypasses policy.
+  --head SHA          Source head shown by the preview (8-40 hex characters); required with --execute.
+  --waive-checklist   Owner's decision only: do not block on unticked or stale checklist items.
+                      Never ticks or edits a box. Other block reasons still apply.
+  --requeue-expired   Requeue expired build policy evaluations only; cannot be combined with --execute.
+  --interval, --timeout   Completion polling after --execute (default 5s, 300s).
+Azure DevOps only; GitHub remotes: use the merge-pr skill.
+EOF
+        exit 0
+        ;;
+    esac
+    source "$PR_ROOT/lib/azure-devops.sh"
+    unsupported_github "Use the merge-pr skill to merge GitHub pull requests."
+    source "$PR_ROOT/lib/pr-merge.sh"
     ;;
   open)
     case " $* " in

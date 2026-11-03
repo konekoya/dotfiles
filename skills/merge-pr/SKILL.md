@@ -24,7 +24,7 @@ Read only the selected reference. If the remote is missing or another provider, 
 
 ## 1. Check readiness
 
-For each candidate PR, use the reference's readiness query. A PR is ready only when it is open, not a draft, has no merge conflict, has the required approvals, and every required check **succeeded on the PR's current head (or current merge commit)**. A green result from an older commit does not count. Report each PR that is not ready, with the reason, and do not merge it.
+For each candidate PR, use the reference's readiness query (on Azure DevOps that is the `pr merge` preview, which implements these rules and fails closed on anything it does not recognise). A PR is ready only when it is open, not a draft, has no merge conflict, has the required approvals, and every required check **succeeded on the PR's current head (or current merge commit)**. A green result from an older commit does not count. Report each PR that is not ready, with the reason, and do not merge it.
 
 ### Manual test checklist
 
@@ -32,12 +32,12 @@ For each candidate PR, use the reference's readiness query. A PR is ready only w
 
 - **No block**: report `no risk assessment` and continue; the PR predates the checklist or was not made by `create-pr`.
 - **All items ticked** (`- [x]`) or no checklist items: report the overall risk rating exactly as the block writes it (for example `🟡 中（2/3）`) and `checklist complete`.
-- **Any item unticked** (`- [ ]`): the PR is not ready. List each unticked item verbatim, with the dimension it belongs to (the `####` heading above it, or the prefix on the item in an older block) and the overall risk rating, and do not merge. Only the user may waive this: merge only after they explicitly accept the listed items for that PR, and record the waiver in the final report.
+- **Any item unticked** (`- [ ]`): the PR is not ready. List each unticked item verbatim, with the dimension it belongs to (the `####` heading above it, or the prefix on the item in an older block) and the overall risk rating, and do not merge. Only the user may waive this: merge only after they explicitly accept the listed items for that PR, and record the waiver in the final report. On Azure DevOps the waiver is the `--waive-checklist` flag of `pr merge --execute`; pass it only for a PR the owner said to waive in this session.
 - **Stale score**: when the block's `scored at` commit is not the PR's current head, ticks and items may describe older code. Report it and ask whether to refresh with `create-pr` or merge anyway; do not treat stale ticks as complete.
 
 When the overall rating is high (3/3), also report the block's `回復方式` / `Rollback` line verbatim, so the rollback is visible before the merge; it is a statement, not a box, and does not gate the merge by itself. Read the block the same way whatever format version wrote it: only the markers, the `- [ ]` / `- [x]` boxes and, for naming an item's dimension, its `####` heading or old prefix matter. Never decide readiness from an item's wording.
 
-Never tick or edit a checklist box yourself, not even when the user says they verified it; ask them to tick it, or to say explicitly that the item is waived.
+Never tick or edit a checklist box yourself, not even when the user says they verified it; ask them to tick it, or to say explicitly that the item is waived. `--waive-checklist` never edits a box.
 
 ## 2. Choose an order
 
@@ -55,7 +55,7 @@ After each merge, re-run step 1 for the next PR. Required builds can expire when
 
 ## 3. Merge
 
-Squash-merge unless the repository requires another strategy. Pin the merge to the head you verified so a late push cannot slip in. Use the PR title as the subject and its description as the body, with the `risk-assessment` block removed (it is review state, not history), trimmed if the provider rejects the length. Never add AI attribution or co-author trailers. Follow the reference for the command, stale-check refresh, and known failures. Verify the PR reports merged/completed and record the merge commit before moving on.
+Squash-merge unless the repository requires another strategy. Pin the merge to the head you verified so a late push cannot slip in. Use the PR title as the subject and its description as the body, with the `risk-assessment` block removed (it is review state, not history), trimmed if the provider rejects the length. Never add AI attribution or co-author trailers. On Azure DevOps, `pr merge --execute --head <head from the preview>` does all of this (pinned squash, subject, body without the block, no attribution, no policy bypass) after the user approves; on GitHub follow the reference. Follow the reference for the command, stale-check refresh, and known failures. Verify the PR reports merged/completed and record the merge commit before moving on.
 
 ## 4. Close out
 
