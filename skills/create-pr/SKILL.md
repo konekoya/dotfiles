@@ -85,7 +85,16 @@ Read the actual diff content for non-trivial changes — don't trust commit mess
 
 ### 5. Draft PR details
 
-Pick the most accurate prefix, same table the `create-git-commit` skill uses:
+Resolve the repository's PR title format before choosing a default prefix. Read its agent
+instructions, contributing guide and template, then inspect recent PR titles for the intended
+target branch with the selected provider. PR titles can use a different format from commit
+subjects. Verify the primary linked work item or supplied task ID; branch digits and commit
+prefixes are hints, not authority. Carry the chosen title format and primary task ID into the
+publication preview. Project conventions take precedence over the provider fallback, including
+an Azure DevOps work-item prefix even when no ClickUp task exists.
+
+When the repository format calls for a Conventional Commit prefix, pick the most accurate
+prefix using the same table as `create-git-commit`:
 
 | Type        | When to use                                                            |
 | ----------- | ---------------------------------------------------------------------- |
@@ -112,6 +121,11 @@ Follow the selected reference's title and description conventions. Preserve expl
 Collect any missing target, title, description, draft preference, and reviewers with `ask_user`. Default new PRs to ready for review with no reviewers; preserve existing draft state and reviewers unless the user requests a change. Azure DevOps alone includes the optional ClickUp URL. If the target changes, repeat step 4 and redraft against the corrected target.
 
 ### 6. Preview and publish
+
+Before publishing, check the title against the resolved project format and verify that any
+work-item prefix matches the intended primary linked item (not the PR number). For example,
+a repository requiring `[1234] Description` must not fall back to `fix: description` just
+because ClickUp is absent. Include the format and work-item check in the final readback.
 
 Show the full concrete preview: provider and repository, source → target, title, draft state, reviewer changes, and complete description. Obtain **Create PR** / **Update PR** / **Abort** authorization unless the session already authorizes publishing these details.
 

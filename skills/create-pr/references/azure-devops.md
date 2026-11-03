@@ -60,22 +60,32 @@ curl -s -H "Authorization: ${CLICKUP_API_TOKEN}" "https://api.clickup.com/api/v2
 
 If `CLICKUP_API_TOKEN` isn't set, or the fetch fails, fall back to drafting `<description>` from the diff/commits as usual — this integration is optional, same as everywhere else ClickUp shows up in this repo.
 
-**Title.** Format: `[#<taskId>] <description>` if a ClickUp task ID/URL is available, otherwise `<type>: <description>`. The Conventional Commit type prefix is only used when there's no ClickUp task ID to anchor the PR — once a task ID is available, the `[#<taskId>]` bracket alone identifies the change and the `type:`/`type(scope):` prefix is dropped.
+**Title.** Resolve the format in this order:
 
-- `<type>` is the Conventional Commit type resolved in shared step 5 — only relevant when there's no ClickUp task ID.
-- `<description>`:
-  - If a ClickUp task ID/URL is available and a ClickUp task title was fetched above: use it as the description as-is, capitalization included — don't redraft it from the diff or lowercase it, the ClickUp title is already the source of truth for what this PR does.
-  - If a ClickUp task ID/URL is available but no title could be fetched (token unset or fetch failed): draft it from the diff/commits gathered in shared step 4, lowercase, imperative mood, no trailing period — same as the no-ClickUp case below — but still omit the `<type>:` prefix, since the bracket is present.
-  - Otherwise (no ClickUp task ID at all): draft it from the diff/commits gathered in shared step 4, lowercase, imperative mood ("add", "fix", "remove" — not "Added", "Fixes"), no trailing period. If the change is scoped to a clear area, optionally use `type(scope): subject`.
-- Example with ClickUp ID: `[#z91464g58x] Update editor file menu behavior`.
-- Example without: `fix: upload overlay ignoring entity z-order`.
+1. **Explicit user and repository convention.** Read the project instructions and recent PR
+   titles for the target branch. When that project prefixes Azure DevOps work-item IDs, use
+   its exact syntax, such as `[1234] Move the reset control below the settings`. This is an
+   ADO work-item prefix, not a ClickUp prefix: absence of ClickUp does not remove it. Use
+   the verified primary work item supplied by the user or linked to the PR. Confirm an ID
+   inferred from a branch against the task; a branch number can differ from the linked item.
+   If several work items make the primary ID unclear, ask rather than choose arbitrarily.
+2. **ClickUp convention, when no project-specific format is defined.** Use
+   `[#<taskId>] <description>` when a ClickUp task ID/URL is available. Adapt the fetched
+   task title when available; otherwise draft a description from the actual diff. Do not
+   add a Conventional Commit prefix after a task bracket unless the project requires it.
+3. **Provider fallback.** Only when neither a project title format nor the ClickUp format
+   applies, use `<type>: <description>` or `<type>(<scope>): <description>`. Resolve the
+   type from shared step 5; use a lowercase imperative description with no trailing period.
 
-**If a title is already available** — supplied as the skill argument, or an existing PR title being reused in update mode — use it as-is, but still verify it matches the format above and correct it if not:
+Follow the project's capitalization and language when a project format applies. Commit
+subjects do not override a verified PR convention. A title prefix does not replace linking
+the work item through Azure DevOps.
 
-- Add the ClickUp bracket if one is available and missing.
-- If a ClickUp bracket is present (or was just added): strip any `<type>:` or `<type>(<scope>):` prefix that follows it — it doesn't belong once the bracket anchors the PR to a task.
-- If no ClickUp bracket is available: insert the type prefix resolved in shared step 5 if missing, or correct it if present but not one of the table in shared step 5.
-- Don't touch parts of the title that are already correct.
+**If a title is already available** — user-supplied or from an existing PR — validate it
+against the resolved project format before publication, rather than blindly applying the
+provider fallback. Preserve explicit wording and correctly formatted task brackets. If the
+user's exact wording conflicts with the required format, resolve that conflict in the preview.
+In update mode, keep title corrections within the user's requested scope.
 
 **Description.** Follow the exact structure the `summarize-pr` skill uses: default to Traditional Chinese (繁體中文) unless the user or repository instructions require another language. Section headings (`## 摘要`, `## 主要變更`, `## 自動化測試`) and prose are in Chinese; code identifiers, file paths, function/variable names, and error strings stay verbatim in their original form.
 
