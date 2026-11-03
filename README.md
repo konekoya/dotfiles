@@ -386,15 +386,34 @@ fetch/push remote pair and profile before sending a request.
 
 ### `pr`
 
-Lists active Azure DevOps PRs created by you and assigned to you, across all projects in your org.
+Lists and inspects pull requests or opens the current PR. Azure DevOps supports
+all subcommands; GitHub supports `pr open` only.
 
 ```sh
-pr
+pr                         # same as pr list
+pr list                    # active PRs created by you and assigned to you
+pr status [ID]             # current branch's PR, or a specific PR
+pr status [ID] --watch     # re-check every 20s while builds are pending
+pr status [ID] --interval 10
+pr status [ID] --json      # one read-only JSON snapshot
+pr comments [ID]           # current branch's PR, or a specific PR
+pr open                    # open PR in Chrome, or the repository page
 ```
 
-Inside a repository, the organization comes from the selected Git remote. Outside
-a repository, select an organization with `AZURE_DEVOPS_PROFILE` or the legacy
-single-org pair `AZURE_DEVOPS_ORG` and `AZURE_DEVOPS_PAT`.
+Every subcommand supports `--help`. `pr status --json` cannot be combined with
+`--watch`. Its stable JSON object has these keys:
+
+- `pullRequestId`: numeric PR identifier.
+- `organization`, `project`, `repository`: safe names resolved from the selected
+  Azure DevOps remote and profile.
+- `state`: `failed`, `pending`, `succeeded`, or `none`.
+- `checks`: array of build policy snapshots, each with `state` (`failed`,
+  `pending`, `succeeded`, or `unknown`) and numeric-or-null `buildId`.
+
+The snapshot contains no URLs or authentication data. Inside a repository, the
+organization comes from the selected Git remote. Outside a repository, `pr list`
+can use `AZURE_DEVOPS_PROFILE` or the legacy single-org pair `AZURE_DEVOPS_ORG`
+and `AZURE_DEVOPS_PAT`.
 
 Repository commands use the matching profile selected with
 `git config --local azure-devops.profile work-company-a`. `AZURE_DEVOPS_ORG` never replaces
@@ -402,50 +421,20 @@ an organization parsed from a remote.
 
 **Requires:** `jq`, `curl`
 
-### `pr-comments`
-
-Fetches and displays PR comment threads for the current branch, or a specific PR.
-
-```sh
-pr-comments          # auto-detects PR from current branch
-pr-comments <PR_ID>  # specific PR
-```
-
-Same auth and org resolution as `pr`. **Requires:** `jq`, `curl`
-
-Automatic PR lookup uses the project and repository identified by the selected
-remote and selects an active PR. Pass an explicit PR ID to inspect a completed PR.
+Automatic status and comment lookup use the project and repository identified by
+the selected remote and select an active PR. Pass an explicit ID to inspect a
+completed PR. `pr-status`, `pr-comments`, and `repo` remain deprecated compatibility
+commands and forward to `pr status`, `pr comments`, and `pr open` respectively.
 
 Set the per-repository remote with `git config --local azure-devops.remote <name>`;
 the default remains `origin`. The selected remote must have one fetch URL and one
 push URL for the same repository. `ado-rest context` shows the safe, parsed
 organization/project/repository and verifies the matching authentication profile.
 
-### `pr-status`
-
-Shows CI/build status for the current branch's PR, and drills into the failing job's log if it's red.
-
-```sh
-pr-status             # auto-detects PR from current branch
-pr-status <PR_ID>     # specific PR
-pr-status --watch     # re-check every 20s until no longer pending
-```
-
-Same auth and org resolution as `pr`. **Requires:** `jq`, `curl`
-
 HTTP, connection, and malformed-response failures exit non-zero. A failed policy
 request is not treated as an empty set of checks. `--interval` requires a positive
-integer number of seconds.
-
-### `repo`
-
-Looks up an open PR for the current branch and opens it in Chrome when authentication and lookup dependencies are available; otherwise opens the repository page. Supports Azure DevOps and GitHub remotes.
-
-```sh
-repo
-```
-
-Supports SSH and HTTPS remotes, including legacy Azure DevOps `visualstudio.com` URLs.
+integer number of seconds. `pr open` supports SSH and HTTPS remotes, including
+legacy Azure DevOps `visualstudio.com` URLs.
 
 ### `clickup`
 
@@ -508,7 +497,7 @@ Without `CLICKUP_API_TOKEN`, the script still creates the PR but skips ClickUp i
 API requests in the PR utilities use a 10-second connection timeout and a
 60-second total timeout. HTTP errors and malformed JSON are reported without
 printing response bodies or credentials. Mutations are not retried automatically.
-`repo` retains its repository-page fallback when optional PR lookup fails;
+`pr open` retains its repository-page fallback when optional PR lookup fails;
 `submit-pr` can continue after an optional ClickUp request fails.
 
 **Requires:** `jq`, `curl`
@@ -724,10 +713,10 @@ See [agent tooling](agents/tooling.md) for discovery and integration guidance.
 |------|-------------|---------|
 | `delta` | git diff pager | `brew install git-delta` |
 | `fzf` | `cmds`, `track-branch`, `image-shrink` picker (optional; all have Bash fallbacks); shell key bindings in `zsh/.zshrc.shared` (0.48+, optional) | `brew install fzf` |
-| `jq` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`, `clickup`; optional PR lookup in `repo` | `brew install jq` |
-| `curl` | `pr`, `pr-comments`, `pr-status`, `submit-pr`, `ado-rest`, `clickup`; optional PR lookup in `repo` | usually pre-installed |
+| `jq` | `pr`, `submit-pr`, `ado-rest`, `clickup`; optional PR lookup in `pr open` | `brew install jq` |
+| `curl` | `pr`, `submit-pr`, `ado-rest`, `clickup`; optional PR lookup in `pr open` | usually pre-installed |
 | `az` | Azure DevOps profiles configured with `auth = azure-cli` | `brew install --cask azure-cli` |
-| `gh` | `gh-auth` and the GitHub skills; optional GitHub auth for `repo` | `brew install gh` |
+| `gh` | `gh-auth` and the GitHub skills; optional GitHub auth for `pr open` | `brew install gh` |
 | `starship` | shared prompt (`zsh/starship.toml`); needs a Nerd Font, falls back to the oh-my-zsh theme without it | `brew install starship` |
 | `shellcheck` | lint of `install.sh`, `scripts/*`, `lib/*.sh`, and `tests/*.sh` in CI and before committing shell changes (see `AGENTS.md`) | `brew install shellcheck` |
 | `magick` | `image-shrink`; includes `libheif` for HEIC/HEIF input and output | `brew install imagemagick` |
@@ -884,7 +873,7 @@ Migration: if you relied on `alias/.env` to export other variables into your she
 | `AZURE_DEVOPS_PAT` | Legacy single-organization REST setup | No — use only with matching `AZURE_DEVOPS_ORG` |
 | `AZURE_DEVOPS_ORG` | Legacy single-org setup; explicit organization for `pr` outside a repository | No — must match a repository remote and never overrides it |
 | `AZURE_DEVOPS_PROFILE` | `pr` outside a repository | No — selects a profile whose organization is configured in Git config |
-| `GITHUB_TOKEN` | `gh-auth` (GitHub skills), and PR lookup in `repo` | No — both fall back to your `gh auth login` credentials |
+| `GITHUB_TOKEN` | `gh-auth` (GitHub skills), and PR lookup in `pr open` | No — both fall back to your `gh auth login` credentials |
 | `GIT_WORK_NAME` | `config-git` | Needed with `GIT_WORK_EMAIL` when configuring a repository |
 | `GIT_WORK_EMAIL` | `config-git` | Needed with `GIT_WORK_NAME` when configuring a repository |
 

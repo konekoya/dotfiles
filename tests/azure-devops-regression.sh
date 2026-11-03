@@ -13,6 +13,8 @@ REAL_TAIL="$(command -v tail)" || exit 1
 REAL_SED="$(command -v sed)" || exit 1
 REAL_GREP="$(command -v grep)" || exit 1
 REAL_DIRNAME="$(command -v dirname)" || exit 1
+REAL_READLINK="$(command -v readlink)" || exit 1
+REAL_CMP="$(command -v cmp)" || exit 1
 REAL_RM="$(command -v rm)" || exit 1
 REAL_FIND="$(command -v find)" || exit 1
 REAL_CAT="$(command -v cat)" || exit 1
@@ -123,7 +125,7 @@ make_repo() {
   printf '%s' "$repo_dir"
 }
 
-for tool_path in "$REAL_GIT" "$REAL_JQ" "$REAL_BASE64" "$REAL_TR" "$REAL_HEAD" "$REAL_TAIL" "$REAL_SED" "$REAL_GREP" "$REAL_DIRNAME" "$REAL_RM" "$REAL_FIND" "$REAL_CAT" "$REAL_CHMOD" "$REAL_MKTEMP"; do
+for tool_path in "$REAL_GIT" "$REAL_JQ" "$REAL_BASE64" "$REAL_TR" "$REAL_HEAD" "$REAL_TAIL" "$REAL_SED" "$REAL_GREP" "$REAL_DIRNAME" "$REAL_READLINK" "$REAL_CMP" "$REAL_RM" "$REAL_FIND" "$REAL_CAT" "$REAL_CHMOD" "$REAL_MKTEMP"; do
   link_tool "$tool_path"
 done
 
@@ -252,6 +254,8 @@ case "$url" in
   */_apis/policy/evaluations*)
     if [ "${ADO_TEST_CURL_MODE:-}" = invalid-policies ]; then
       printf '%s\n' '{"message":"missing-policy-array"}'
+    elif [ "${ADO_TEST_CURL_MODE:-}" = json-sensitive ]; then
+      printf '%s\n' '{"value":[{"configuration":{"type":{"displayName":"Build"}},"status":"running","context":{"buildId":7,"buildDefinitionName":"synthetic-token-value","url":"https://synthetic-user:synthetic-password@example.invalid/check"}}]}'
     elif [ "${ADO_TEST_CURL_MODE:-}" = failed-build ]; then
       printf '%s\n' '{"value":[{"configuration":{"type":{"displayName":"Build"}},"status":"rejected","context":{"buildId":7}}]}'
     else
@@ -559,6 +563,24 @@ assert_equal '@/dev/fd/3' "$(cat "$SCRIPT_AUTH_ARG_FILE")" "curl auth descriptor
 assert_no_secret "$(cat "$SCRIPT_AUTH_ARG_FILE")" "$AZURE_DEVOPS_PAT_WORK"
 if find "$TEST_ROOT" -maxdepth 1 -name 'dotfiles-http.*' | "$REAL_GREP" -q .; then fail "curl auth transport created a header file"; fi
 
+# The deprecated comments shim preserves stdout and exit code, with one stderr notice.
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/pr" comments 123 \
+  > "$TEST_ROOT/pr-comments-new.stdout" 2> "$TEST_ROOT/pr-comments-new.stderr"; then
+  new_status=0
+else
+  new_status=$?
+fi
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$PR_COMMENTS" 123 \
+  > "$TEST_ROOT/pr-comments-old.stdout" 2> "$TEST_ROOT/pr-comments-old.stderr"; then
+  old_status=0
+else
+  old_status=$?
+fi
+[ "$new_status" -eq "$old_status" ] || fail "pr-comments shim changed the exit code"
+"$REAL_CMP" -s "$TEST_ROOT/pr-comments-new.stdout" "$TEST_ROOT/pr-comments-old.stdout" || fail "pr-comments shim changed stdout"
+assert_equal "⚠️  pr-comments is deprecated; use 'pr comments'." "$(cat "$TEST_ROOT/pr-comments-old.stderr")" "pr-comments deprecation diagnostic"
+[ ! -s "$TEST_ROOT/pr-comments-new.stderr" ] || fail "pr comments wrote unexpected stderr"
+
 # Selecting another organization's profile is rejected before making a request.
 "$REAL_GIT" config --local azure-devops.profile personal
 rm -f "$SCRIPT_URLS_FILE"
@@ -605,6 +627,79 @@ assert_equal "$expected_basic" "$(cat "$SCRIPT_HEADER_FILE")" "pr-status shared 
 assert_no_secret "$script_output" "$AZURE_DEVOPS_PAT_WORK"
 "$REAL_GREP" -Fq 'https://dev.azure.com/script-org/script-project/' "$SCRIPT_URLS_FILE" || fail "pr-status did not use parsed Azure org/project context"
 
+# The selected remote wins over AZURE_DEVOPS_ORG for the new CLI too.
+rm -f "$SCRIPT_URLS_FILE"
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" AZURE_DEVOPS_ORG=redirected-org \
+  "$FIXTURE_DOTFILES/scripts/pr" status 123 > "$TEST_ROOT/pr-org-override.stdout" 2>&1; then
+  fail "pr status accepted AZURE_DEVOPS_ORG as a remote override"
+fi
+"$REAL_GREP" -Fq 'does not match the selected repository organization' "$TEST_ROOT/pr-org-override.stdout" || fail "pr status did not report the organization mismatch"
+[ ! -s "$SCRIPT_URLS_FILE" ] || fail "pr status sent a request after an organization mismatch"
+
+# The deprecated status shim adds one stderr line while preserving stdout and status.
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/pr" status 123 \
+  > "$TEST_ROOT/pr-status-new.stdout" 2> "$TEST_ROOT/pr-status-new.stderr"; then
+  new_status=0
+else
+  new_status=$?
+fi
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$PR_STATUS" 123 \
+  > "$TEST_ROOT/pr-status-old.stdout" 2> "$TEST_ROOT/pr-status-old.stderr"; then
+  old_status=0
+else
+  old_status=$?
+fi
+[ "$new_status" -eq "$old_status" ] || fail "pr-status shim changed the exit code"
+"$REAL_CMP" -s "$TEST_ROOT/pr-status-new.stdout" "$TEST_ROOT/pr-status-old.stdout" || fail "pr-status shim changed stdout"
+assert_equal "⚠️  pr-status is deprecated; use 'pr status'." "$(cat "$TEST_ROOT/pr-status-old.stderr")" "pr-status deprecation diagnostic"
+[ ! -s "$TEST_ROOT/pr-status-new.stderr" ] || fail "pr status wrote unexpected stderr"
+
+# Watch mode remains byte-for-byte identical for babysit-pr-checks consumers.
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" ADO_TEST_CURL_MODE=failed-build \
+  "$FIXTURE_DOTFILES/scripts/pr" status 123 --watch \
+  > "$TEST_ROOT/pr-status-watch-new.stdout" 2> "$TEST_ROOT/pr-status-watch-new.stderr"; then
+  new_status=0
+else
+  new_status=$?
+fi
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" ADO_TEST_CURL_MODE=failed-build \
+  "$PR_STATUS" 123 --watch \
+  > "$TEST_ROOT/pr-status-watch-old.stdout" 2> "$TEST_ROOT/pr-status-watch-old.stderr"; then
+  old_status=0
+else
+  old_status=$?
+fi
+[ "$new_status" -eq "$old_status" ] || fail "pr-status --watch shim changed the exit code"
+"$REAL_CMP" -s "$TEST_ROOT/pr-status-watch-new.stdout" "$TEST_ROOT/pr-status-watch-old.stdout" || fail "pr-status --watch shim changed stdout"
+assert_equal "⚠️  pr-status is deprecated; use 'pr status'." "$(cat "$TEST_ROOT/pr-status-watch-old.stderr")" "pr-status --watch deprecation diagnostic"
+[ ! -s "$TEST_ROOT/pr-status-watch-new.stderr" ] || fail "pr status --watch wrote unexpected stderr"
+
+# JSON is a one-shot allowlisted snapshot and omits auth headers and API-supplied URLs/text.
+script_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" ADO_TEST_CURL_MODE=json-sensitive \
+  "$FIXTURE_DOTFILES/scripts/pr" status 123 --json 2>&1)" || fail "pr status --json failed: $script_output"
+assert_equal '{"pullRequestId":123,"organization":"script-org","project":"script-project","repository":"script-repo","state":"pending","checks":[{"state":"pending","buildId":7}]}' "$script_output" "pr status JSON snapshot"
+assert_no_secret "$script_output" "$AZURE_DEVOPS_PAT_WORK"
+assert_no_secret "$script_output" "Authorization"
+assert_no_secret "$script_output" "$expected_basic"
+assert_no_secret "$script_output" "synthetic-token-value"
+assert_no_secret "$script_output" "synthetic-user:synthetic-password@"
+
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/pr" status 123 --json --watch \
+  > "$TEST_ROOT/json-watch.stdout" 2> "$TEST_ROOT/json-watch.stderr"; then
+  fail "pr status accepted --json with --watch"
+else
+  json_watch_status=$?
+fi
+[ "$json_watch_status" -eq 2 ] || fail "--json with --watch did not return usage exit code 2"
+"$REAL_GREP" -Fq -- '--json cannot be combined with --watch' "$TEST_ROOT/json-watch.stderr" || fail "--json/--watch error was unclear"
+[ ! -s "$TEST_ROOT/json-watch.stdout" ] || fail "--json/--watch error wrote to stdout"
+
+# An installed symlink must resolve helpers from the dispatcher checkout, not PATH.
+ln -s "$FIXTURE_DOTFILES/scripts/pr" "$TEST_ROOT/pr-symlink" || fail "could not create pr symlink"
+PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" ADO_TEST_CURL_MODE=json-sensitive \
+  "$TEST_ROOT/pr-symlink" status 123 --json > "$TEST_ROOT/pr-symlink.json" 2>&1 || fail "symlinked pr could not find its lib directory"
+"$REAL_CMP" -s "$TEST_ROOT/pr-symlink.json" <(printf '%s\n' "$script_output") || fail "symlinked pr returned a different snapshot"
+
 script_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" ADO_TEST_CURL_MODE=failed-build "$PR_STATUS" 123 2>&1)"
 [ "$?" -eq 0 ] || fail "failed build details could not be displayed: $script_output"
 case "$script_output" in *'ordinary build output'*) ;; *) fail "plain-text build log was not displayed" ;; esac
@@ -633,6 +728,12 @@ script_output="$(cd "$TEST_ROOT/no-git" && PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" 
 [ "$?" -eq 0 ] || fail "pr failed with the shared helpers: $script_output"
 "$REAL_GREP" -Fq 'Project%20With%20Spaces/_apis/git/pullrequests' "$SCRIPT_URLS_FILE" || fail "pr did not encode project names"
 
+for help_command in 'list' 'status' 'comments' 'open'; do
+  PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/pr" "$help_command" --help \
+    > "$TEST_ROOT/pr-help-output" 2>&1 || fail "pr $help_command --help failed"
+  [ -s "$TEST_ROOT/pr-help-output" ] || fail "pr $help_command --help returned no help text"
+done
+
 # Browser lookup shares Azure auth, strips .git, and retains HTTP-error fallback.
 cat > "$SCRIPT_BIN/open" <<'EOF'
 #!/bin/bash
@@ -647,10 +748,39 @@ assert_equal 'https://dev.azure.com/script-org/script-project/_git/script-repo/p
 PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" ADO_TEST_CURL_MODE=denied AZURE_DEVOPS_PAT=repo-pat \
   "$FIXTURE_DOTFILES/scripts/repo" > "$TEST_ROOT/repo-error-output" 2>&1 || fail "repo HTTP fallback failed"
 assert_equal 'https://dev.azure.com/script-org/script-project/_git/script-repo' "$(cat "$ADO_TEST_OPEN_FILE")" "repository fallback URL"
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" ADO_TEST_CURL_MODE=repo-pr AZURE_DEVOPS_PAT=repo-pat \
+  "$FIXTURE_DOTFILES/scripts/pr" open > "$TEST_ROOT/pr-open-new.stdout" 2> "$TEST_ROOT/pr-open-new.stderr"; then
+  new_status=0
+else
+  new_status=$?
+fi
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" ADO_TEST_CURL_MODE=repo-pr AZURE_DEVOPS_PAT=repo-pat \
+  "$FIXTURE_DOTFILES/scripts/repo" > "$TEST_ROOT/repo-old.stdout" 2> "$TEST_ROOT/repo-old.stderr"; then
+  old_status=0
+else
+  old_status=$?
+fi
+[ "$new_status" -eq "$old_status" ] || fail "repo shim changed the exit code"
+"$REAL_CMP" -s "$TEST_ROOT/pr-open-new.stdout" "$TEST_ROOT/repo-old.stdout" || fail "repo shim changed stdout"
+assert_equal "⚠️  repo is deprecated; use 'pr open'." "$(cat "$TEST_ROOT/repo-old.stderr")" "repo deprecation diagnostic"
+[ ! -s "$TEST_ROOT/pr-open-new.stderr" ] || fail "pr open wrote unexpected stderr"
 "$REAL_GIT" remote set-url origin git@github.com:example/sample.git || fail "could not prepare GitHub remote"
 PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" GITHUB_TOKEN=github-pat \
   "$FIXTURE_DOTFILES/scripts/repo" > "$TEST_ROOT/github-output" 2>&1 || fail "GitHub repo lookup failed"
 assert_equal 'https://github.com/example/sample/pull/42' "$(cat "$ADO_TEST_OPEN_FILE")" "GitHub PR browser URL"
+
+# GitHub supports pr open; all other command groups reject the remote without being redirected by AZURE_DEVOPS_ORG.
+rm -f "$SCRIPT_URLS_FILE"
+for github_command in list status comments; do
+  case "$github_command" in
+    list) script_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" AZURE_DEVOPS_ORG=redirected-org "$FIXTURE_DOTFILES/scripts/pr" list 2>&1)" ;;
+    status) script_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" AZURE_DEVOPS_ORG=redirected-org "$FIXTURE_DOTFILES/scripts/pr" status 123 2>&1)" ;;
+    comments) script_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" AZURE_DEVOPS_ORG=redirected-org "$FIXTURE_DOTFILES/scripts/pr" comments 123 2>&1)" ;;
+  esac
+  [ "$?" -ne 0 ] || fail "pr $github_command accepted a GitHub remote"
+  "$REAL_GREP" -Fq 'unsupported for GitHub remotes' <<< "$script_output" || fail "pr $github_command did not report GitHub as unsupported"
+done
+[ ! -s "$SCRIPT_URLS_FILE" ] || fail "unsupported GitHub subcommand made an API request"
 
 # Publish only into shims: no real push, PR creation, or ClickUp writes are made.
 "$REAL_GIT" remote set-url origin git@ssh.dev.azure.com:v3/script-org/script-project/script-repo.git

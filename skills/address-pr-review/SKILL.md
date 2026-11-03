@@ -12,6 +12,7 @@ When you need to fetch and address automated Copilot review comments from the Az
 ## Prerequisites
 
 - `ado-rest` must be on `$PATH` — it is available after `dotfiles/install.sh`.
+- `pr comments [ID]` provides a formatted view of the selected Azure DevOps PR; this workflow still uses `ado-rest` below to retain thread IDs for replies.
 - The local branch must have a matching PR in Azure DevOps.
 
 Azure DevOps requests use the selected repository profile, not Azure CLI defaults.

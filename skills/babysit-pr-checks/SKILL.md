@@ -16,7 +16,7 @@ For review-comment handling only (no CI babysitting), use `address-pr-review` in
 
 - `ado-rest` must be on `$PATH` — it is available after `dotfiles/install.sh`.
 - The local branch must have a matching PR in Azure DevOps.
-- `pr-status` (this repo's `scripts/pr-status`) must be on `$PATH` — it is, once `dotfiles/install.sh` has been run.
+- `pr` (this repo's `scripts/pr`) must be on `$PATH` — it is, once `dotfiles/install.sh` has been run.
 
 Azure DevOps requests use the selected repository profile, not Azure CLI defaults.
 
@@ -256,16 +256,16 @@ After replying to a thread, update the in-session `{thread_id: comment_count}` r
 Run the watch in the background rather than polling turn-by-turn:
 
 ```bash
-pr-status --watch
+pr status --watch
 ```
 
-Invoke this via the Bash tool with `run_in_background: true`. Don't sleep or re-check manually — a completion notification arrives automatically when the watch exits, either because the PR's status resolved (succeeded/failed) or because it hit its internal ~9-minute cap while still pending. In the latter case, just invoke `pr-status --watch` again in the background and continue waiting.
+Invoke this via the Bash tool with `run_in_background: true`. Don't sleep or re-check manually — a completion notification arrives automatically when the watch exits, either because the PR's status resolved (succeeded/failed) or because it hit its internal ~9-minute cap while still pending. In the latter case, just invoke `pr status --watch` again in the background and continue waiting.
 
 While waiting, tell the user briefly that CI is being watched in the background and move on — don't narrate every internal poll.
 
 ### 14. Diagnose and fix remote failures
 
-If `pr-status` reports a failure, its output already includes the failing job/task name and a capped, grep-filtered log excerpt (never the full log — this PR's status surface only exposes one aggregate build state, so the per-check detail comes entirely from that drill-down).
+If `pr status` reports a failure, its output already includes the failing job/task name and a capped, grep-filtered log excerpt (never the full log — this PR's status surface only exposes one aggregate build state, so the per-check detail comes entirely from that drill-down).
 
 1. Summarize the failure to the user in a sentence or two: which check, what the excerpt shows.
 2. Propose a fix.
@@ -274,11 +274,11 @@ If `pr-status` reports a failure, its output already includes the failing job/ta
 
 **Track repeats.** If the same named check fails again after a fix that was already applied and pushed, for the 3rd consecutive time, say so explicitly — e.g. "this doesn't look like a quick fix, want me to keep going or take it from here?" — rather than silently continuing to guess.
 
-If `pr-status` can't identify a specific failed job (e.g. no `targetUrl`, or the build failed with no individual job marked failed), say so and give the user the PR link rather than guessing at a fix blind.
+If `pr status` can't identify a specific failed job (e.g. no `targetUrl`, or the build failed with no individual job marked failed), say so and give the user the PR link rather than guessing at a fix blind.
 
 ### 15. Final review-comment gate
 
-CI succeeding doesn't mean the review is settled — every push since step 4 (merge-conflict commit, review fixes, check fixes, CI-failure fixes) can have triggered a fresh round of Copilot review, or a human reviewer may have commented while this was running. Once `pr-status` reports success, re-check before declaring anything done:
+CI succeeding doesn't mean the review is settled — every push since step 4 (merge-conflict commit, review fixes, check fixes, CI-failure fixes) can have triggered a fresh round of Copilot review, or a human reviewer may have commented while this was running. Once `pr status` reports success, re-check before declaring anything done:
 
 1. Re-run the exact same `ado-rest` fetch-and-filter request from step 4 (same `jq` filter — drop deleted/system/empty threads, skim out closed/resolved and coverage-report threads).
 2. Compare against the in-session `{thread_id: comment_count}` record from steps 4/12:
