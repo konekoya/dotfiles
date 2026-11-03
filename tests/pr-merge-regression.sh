@@ -247,6 +247,8 @@ assert_has "$OUT" "Verdict: ready" "ready preview verdict"
 assert_has "$OUT" "pr merge 123 --execute --head $HEAD_SHA" "ready preview names the pinned head"
 assert_has "$OUT" "Checklist: 1/1 ticked (checklist complete)" "ready preview checklist state"
 assert_has "$OUT" "Overall risk: 🟡 Medium (2/3)" "preview prints the rating line"
+assert_lacks "$OUT" "**" "preview prints the rating line without Markdown emphasis"
+assert_lacks "$OUT" "\`" "preview prints the rating line without backticks"
 assert_no_write "preview"
 assert_requests "preview" "GET $PR_URL
 GET $EVALS_URL
