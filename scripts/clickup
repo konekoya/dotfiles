@@ -62,8 +62,11 @@ case "$command" in
       fi
       content="${content%.}"
     fi
+    # An explicit workspace wins; without one it is looked up after the token loads.
     local_env_load CLICKUP_WORKSPACE_ID
-    valid_id "${CLICKUP_WORKSPACE_ID:-}" || { echo 'Set a valid CLICKUP_WORKSPACE_ID.' >&2; exit 1; } ;;
+    if [ -n "${CLICKUP_WORKSPACE_ID:-}" ]; then
+      valid_id "$CLICKUP_WORKSPACE_ID" || { echo 'Set a valid CLICKUP_WORKSPACE_ID.' >&2; exit 1; }
+    fi ;;
   task) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail_usage; id="$(task_id "$1")" || fail_usage; shift; if [ "$#" -gt 0 ]; then [ "$1" = --json ] || fail_usage; json=true; fi ;;
   status|comment) [ "$#" -eq 2 ] || fail_usage; id="$(task_id "$1")" || fail_usage; value="$2" ;;
   open|snapshot)
@@ -94,6 +97,15 @@ local_env_load CLICKUP_API_TOKEN
 export -n CLICKUP_API_TOKEN
 case "$command" in
   doc)
+    if [ -z "${CLICKUP_WORKSPACE_ID:-}" ]; then
+      workspaces="$(clickup_workspaces)" || api_error
+      if [ "$(printf '%s' "$workspaces" | jq 'length')" != 1 ]; then
+        echo 'Set CLICKUP_WORKSPACE_ID; the token can use these workspaces:' >&2
+        printf '%s' "$workspaces" | jq -r '.[] | "  \(.id) | \(.name)"' >&2
+        exit 1
+      fi
+      CLICKUP_WORKSPACE_ID="$(printf '%s' "$workspaces" | jq -r '.[0].id')"
+    fi
     case "$doc_command" in
       pages)
         pages="$(clickup_doc_pages "$CLICKUP_WORKSPACE_ID" "$doc_id")" || api_error

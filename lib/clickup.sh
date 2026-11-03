@@ -45,6 +45,12 @@ clickup_tasks() {
   done
 }
 
+# Prints a JSON array of {id, name} for the workspaces the token can use. Entries with an
+# unusable id or name are dropped, so an empty array means "none usable".
+clickup_workspaces() {
+  clickup_request "https://api.clickup.com/api/v2/team" | jq -c '
+    [(.teams // [])[] | select((.id | type == "string") and (.id | test("^[A-Za-z0-9_-]+$")) and (.name | type == "string")) | {id, name}]'
+}
 clickup_doc_pages() {
   clickup_request --array "https://api.clickup.com/api/v3/workspaces/$1/docs/$2/page_listing?max_page_depth=-1"
 }

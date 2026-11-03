@@ -20,6 +20,15 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 printf '%s %s\n' "$method" "$url" >> "$MOCK_DIR/requests"
+case "$url" in
+  */api/v2/team)
+    case "${MOCK_TEAMS:-one}" in
+      one) printf '{"teams":[{"id":"777","name":"Only"}]}\n200' ;;
+      two) printf '{"teams":[{"id":"111","name":"First"},{"id":"222","name":"Second"}]}\n200' ;;
+      bad) printf '{"teams":[{"id":"x/y","name":"Bad"}]}\n200' ;;
+    esac
+    exit ;;
+esac
 case "$url" in *'/docs/fail/'*) printf '{}\n404'; exit ;; esac
 if [ "$method" != GET ]; then
   printf '%s' "$body" > "$MOCK_DIR/write"
@@ -97,5 +106,22 @@ if CLICKUP_WORKSPACE_ID='bad/id' "$CLI" doc pages doc-1 > "$TMP/out" 2>&1; then 
 if "$CLI" doc page-create doc-1 > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
 if "$CLI" doc page-update doc-1 p1 "$TMP/content.md" --append yes > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
 [ "$(wc -l < "$TMP/requests")" = "$request_count" ]
+if grep -q 'synthetic_test_credential' "$TMP/args" "$TMP/out"; then echo 'Credential exposed' >&2; exit 1; fi
+# Without CLICKUP_WORKSPACE_ID the workspace is looked up: one usable workspace is used,
+# several or none stop the command with the choices listed and no Doc request sent.
+unset CLICKUP_WORKSPACE_ID
+: > "$TMP/requests"
+"$CLI" doc pages doc-1 > "$TMP/out"
+cmp "$TMP/expected" "$TMP/out"
+grep -Fq 'GET https://api.clickup.com/api/v2/team' "$TMP/requests"
+grep -Fq 'GET https://api.clickup.com/api/v3/workspaces/777/docs/doc-1/page_listing' "$TMP/requests"
+: > "$TMP/requests"
+if MOCK_TEAMS=two "$CLI" doc pages doc-1 > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
+grep -q '111 | First' "$TMP/out"
+grep -q '222 | Second' "$TMP/out"
+[ "$(wc -l < "$TMP/requests" | tr -d ' ')" = 1 ]
+if MOCK_TEAMS=bad "$CLI" doc pages doc-1 > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
+grep -q 'Set CLICKUP_WORKSPACE_ID' "$TMP/out"
+! grep -q '/v3/' "$TMP/requests"
 if grep -q 'synthetic_test_credential' "$TMP/args" "$TMP/out"; then echo 'Credential exposed' >&2; exit 1; fi
 printf '%s\n' 'clickup regression: passed'
