@@ -86,7 +86,7 @@ chmod +x "$TEST_SHIM/git" || fail "could not make git shim executable"
 run_sync_branch() {
   (
     cd "$REPO" || exit 1
-    PATH="$TEST_SHIM:$PATH" \
+    PATH="${SYNC_TEST_PATH:-$TEST_SHIM:$PATH}" \
       SYNC_BRANCH_REAL_GIT="$REAL_GIT" \
       SYNC_TEST_FAIL_BRANCH="${SYNC_TEST_FAIL_BRANCH:-}" \
       SYNC_TEST_SIGNAL="${SYNC_TEST_SIGNAL:-}" \
@@ -94,8 +94,34 @@ run_sync_branch() {
       SYNC_TEST_PR_RESPONSE="${SYNC_TEST_PR_RESPONSE:-}" \
       SYNC_TEST_ADO_LOG="${SYNC_TEST_ADO_LOG:-}" \
       SYNC_TEST_ADO_FAIL="${SYNC_TEST_ADO_FAIL:-}" \
+      SYNC_TEST_GH_RESPONSE="${SYNC_TEST_GH_RESPONSE:-}" \
+      SYNC_TEST_GH_FAIL="${SYNC_TEST_GH_FAIL:-}" \
+      SYNC_TEST_GH_LOG="${SYNC_TEST_GH_LOG:-}" \
       "$SYNC_BRANCH" "$@"
   )
+}
+
+cat > "$TEST_SHIM/gh" <<'EOF'
+#!/bin/bash
+[ -z "${SYNC_TEST_GH_LOG:-}" ] || printf '%s\n' "$*" >> "$SYNC_TEST_GH_LOG"
+[ -z "${SYNC_TEST_GH_FAIL:-}" ] || exit 1
+printf '%s\n' "$SYNC_TEST_GH_RESPONSE"
+EOF
+chmod +x "$TEST_SHIM/gh" || fail "could not make gh mock executable"
+
+use_github_origin() {
+  local dotfiles="$TEST_CASE_DIR/dotfiles"
+  mkdir -p "$dotfiles/scripts" || fail "could not create fixture dotfiles"
+  cp "$REPO_ROOT/scripts/sync-branch" "$dotfiles/scripts/sync-branch" || fail "could not copy sync-branch"
+  cp -R "$REPO_ROOT/lib" "$dotfiles/lib" || fail "could not copy lib"
+  "$REAL_GIT" -C "$REPO" remote set-url origin 'https://github.com/example-owner/example-repo.git' || fail "could not set GitHub origin"
+  SYNC_BRANCH="$dotfiles/scripts/sync-branch"
+  SYNC_TEST_ORIGIN="$TEST_CASE_DIR/origin.git"
+  SYNC_TEST_GH_LOG="$TEST_CASE_DIR/gh.log"
+}
+
+github_response() {
+  printf '[{"number":42,"baseRefName":"%s","headRefOid":"%s"}]' "$2" "$1"
 }
 
 # Creates a stale branch whose change reached main as a different commit, the way a
@@ -280,5 +306,55 @@ use_ado_origin
 SYNC_TEST_ADO_FAIL=1 run_sync_branch > "$TEST_CASE_DIR/output" 2>&1 || fail "PR lookup failure run failed"
 grep -Fq 'PR lookup failed' "$TEST_CASE_DIR/output" || fail "run did not report the failed PR lookup"
 "$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed || fail "failed PR lookup deleted the branch"
+
+setup_squashed_branch github-match
+diverge_main
+"$REAL_GIT" -C "$REPO" push -q origin main || fail "could not push diverged main"
+use_github_origin
+"$REAL_GIT" -C "$REPO" config --local azure-devops.remote other || fail "could not select another remote"
+"$REAL_GIT" -C "$REPO" remote set-url --push origin 'https://github.com/example-owner/other-repo.git' || fail "could not set different push URL"
+SYNC_TEST_GH_RESPONSE="$(github_response "$SQUASHED_TIP" main)"
+run_sync_branch --dry-run > "$TEST_CASE_DIR/output" 2>&1 || fail "GitHub PR dry run failed"
+grep -Fq 'completed PR #42 merged into origin/main — would delete' "$TEST_CASE_DIR/output" || fail "GitHub dry run missed PR proof"
+"$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed || fail "GitHub dry run removed branch"
+grep -Fxq 'pr list -R example-owner/example-repo --state merged --head feature/squashed --limit 100 --json number,baseRefName,headRefOid' "$SYNC_TEST_GH_LOG" || fail "unexpected GitHub lookup"
+run_sync_branch > "$TEST_CASE_DIR/output" 2>&1 || fail "GitHub PR run failed"
+if "$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed; then fail "GitHub PR branch was not deleted"; fi
+
+for scenario in tip base empty failure invalid; do
+  setup_squashed_branch "github-$scenario"
+  diverge_main
+  "$REAL_GIT" -C "$REPO" push -q origin main || fail "could not push diverged main"
+  use_github_origin
+  SYNC_TEST_GH_FAIL=""
+  case "$scenario" in
+    tip) SYNC_TEST_GH_RESPONSE="$(github_response 0000000000000000000000000000000000000000 main)" ;;
+    base) SYNC_TEST_GH_RESPONSE="$(github_response "$SQUASHED_TIP" release)" ;;
+    empty) SYNC_TEST_GH_RESPONSE='[]' ;;
+    failure) SYNC_TEST_GH_FAIL=1 ;;
+    invalid) SYNC_TEST_GH_RESPONSE='invalid json' ;;
+  esac
+  run_sync_branch > "$TEST_CASE_DIR/output" 2>&1 || fail "GitHub $scenario run failed"
+  "$REAL_GIT" -C "$REPO" show-ref --verify --quiet refs/heads/feature/squashed || fail "GitHub $scenario deleted unconfirmed branch"
+  grep -Fq 'contains commits not confirmed' "$TEST_CASE_DIR/output" || fail "GitHub $scenario did not skip branch"
+  case "$scenario" in
+    failure|invalid) grep -Fq 'GitHub PR lookup failed' "$TEST_CASE_DIR/output" || fail "GitHub $scenario omitted failure note" ;;
+  esac
+done
+SYNC_TEST_GH_FAIL=""
+
+setup_squashed_branch github-missing-gh
+"$REAL_GIT" -C "$REPO" push -q origin main || fail "could not push squash"
+use_github_origin
+missing_path="$TEST_CASE_DIR/missing-path"
+mkdir -p "$missing_path" || fail "could not create isolated PATH"
+ln -s "$TEST_SHIM/git" "$missing_path/git" || fail "could not link git shim"
+ln -s "$(command -v jq)" "$missing_path/jq" || fail "could not link jq"
+if PATH="$missing_path:/usr/bin:/bin:/usr/sbin:/sbin" command -v gh >/dev/null 2>&1; then
+  fail "isolated PATH unexpectedly contains gh"
+fi
+SYNC_TEST_PATH="$missing_path:/usr/bin:/bin:/usr/sbin:/sbin" run_sync_branch --dry-run > "$TEST_CASE_DIR/output" 2>&1 || fail "missing gh run failed"
+grep -Fq 'GitHub PR lookup failed' "$TEST_CASE_DIR/output" || fail "missing gh omitted failure note"
+grep -Fq 'changes already present in origin/main' "$TEST_CASE_DIR/output" || fail "missing gh did not fall back to content"
 
 echo "sync-branch regression checks passed"
