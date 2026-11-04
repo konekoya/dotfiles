@@ -66,14 +66,82 @@ wiql_literal() {
   printf "'%s'" "$value"
 }
 
+fallback_completed_states() {
+  printf '%s\n' 'Closed' 'Done' 'Removed' 'Completed' 'Resolved' 'Rejected'
+}
+
+completed_states() {
+  local response
+
+  response="$(http_json -H "$ADO_AUTH_HEADER" \
+    "${base_url}/workitemtypes?api-version=7.1" 2>/dev/null)" || {
+    fallback_completed_states
+    return
+  }
+  if ! printf '%s' "$response" | jq -e '
+    (.value | type == "array" and length > 0) and
+    all(.value[]; (.states | type == "array") and
+      all(.states[]; (.name | type == "string" and length > 0) and
+        (.category | type == "string" and length > 0))) and
+    ([.value[].states[] | select(.category == "Completed" or .category == "Removed" or .category == "Resolved")] | length > 0)
+  ' >/dev/null 2>&1; then
+    fallback_completed_states
+    return
+  fi
+  if ! printf '%s' "$response" | jq -r '
+    [.value[].states[] | select(.category == "Completed" or .category == "Removed" or .category == "Resolved") | .name] | unique[]
+  ' 2>/dev/null; then
+    fallback_completed_states
+  fi
+}
+
+resolve_current_iteration() {
+  local response
+
+  response="$(http_json -H "$ADO_AUTH_HEADER" \
+    "https://dev.azure.com/${ADO_ORG_PATH}/${ADO_PROJECT_PATH}/_apis/work/teamsettings/iterations?api-version=7.1&timeframe=current" 2>/dev/null)" || return 2
+  if ! printf '%s' "$response" | jq -e '
+    (.value | type == "array") and
+    all(.value[]; (.path | type == "string" and length > 0))
+  ' >/dev/null 2>&1; then
+    return 2
+  fi
+  if [ "$(printf '%s' "$response" | jq '.value | length')" -eq 0 ]; then
+    return 1
+  fi
+  printf '%s' "$response" | jq -r '.value[0].path'
+}
+
+base_url="https://dev.azure.com/${ADO_ORG_PATH}/${ADO_PROJECT_PATH}/_apis/wit"
 query='SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.AssignedTo] = @Me'
+resolved_iteration=""
+current_iteration_status=""
+if [ "$iteration_mode" = current ]; then
+  if resolved_iteration="$(resolve_current_iteration)"; then
+    current_iteration_status=resolved
+  else
+    resolve_status=$?
+    case "$resolve_status" in
+      1) current_iteration_status=empty ;;
+      *) current_iteration_status=unresolved ;;
+    esac
+  fi
+fi
 if [ "$iteration_mode" = current ]; then
   query="$query AND [System.IterationPath] = @CurrentIteration"
 else
   query="$query AND [System.IterationPath] = $(wiql_literal "$iteration")"
 fi
 if [ "${#states[@]}" -eq 0 ]; then
-  query="$query AND [System.State] NOT IN ('Closed', 'Done', 'Removed', 'Completed', 'Resolved')"
+  excluded_states="$(completed_states)"
+  separator=""
+  values=""
+  while IFS= read -r state; do
+    [ -n "$state" ] || continue
+    values="$values$separator$(wiql_literal "$state")"
+    separator=', '
+  done <<< "$excluded_states"
+  query="$query AND [System.State] NOT IN ($values)"
 else
   separator=""
   values=""
@@ -93,7 +161,6 @@ if [ "${#types[@]}" -gt 0 ]; then
   query="$query AND [System.WorkItemType] IN ($values)"
 fi
 
-base_url="https://dev.azure.com/${ADO_ORG_PATH}/${ADO_PROJECT_PATH}/_apis/wit"
 body="$(jq -n --arg query "$query" '{query: $query}')"
 response="$(http_json -X POST -H "$ADO_AUTH_HEADER" -H 'Content-Type: application/json' \
   "$base_url/wiql?api-version=7.1" -d "$body")" || exit 1
@@ -125,9 +192,17 @@ while [ "$offset" -lt "$count" ]; do
   items="$(jq -cn --argjson items "$items" --argjson response "$response" '$items + [$response.value[] | {id: .id, type: .fields["System.WorkItemType"], title: .fields["System.Title"], state: .fields["System.State"], iteration: .fields["System.IterationPath"]}]')"
   offset=$((offset + 200))
 done
+if [ "$iteration_mode" = current ] && [ "$count" -eq 0 ]; then
+  case "$current_iteration_status" in
+    empty) echo '⚠️ The team has no current iteration configured; use --iteration <path>.' >&2 ;;
+    unresolved) echo '⚠️ Could not resolve the team current iteration; use --iteration <path>.' >&2 ;;
+  esac
+fi
+output_iteration="$iteration"
+[ -n "$resolved_iteration" ] && output_iteration="$resolved_iteration"
 if [ "$json" = true ]; then
-  jq -n --arg iteration "$iteration" --argjson items "$items" '{iteration: $iteration, items: $items}'
+  jq -n --arg iteration "$output_iteration" --argjson items "$items" '{iteration: $iteration, items: $items}'
 else
-  printf 'Iteration: %s\n' "$iteration"
-  printf '%s' "$items" | jq -r '.[] | [.id, .type, .title, .state, .iteration] | @tsv'
+  printf 'Iteration: %s\n' "$output_iteration"
+  printf '%s' "$items" | jq -r '.[] | [.id, .type, .title, .state, .iteration] | map(if type == "string" then gsub("[\\t\\n\\r]"; " ") else . end) | join("\t")'
 fi
