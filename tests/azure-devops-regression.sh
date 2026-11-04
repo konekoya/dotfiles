@@ -554,6 +554,12 @@ if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" POS
 fi
 PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" PATCH '/_apis/wit/workitems/123?api-version=7.1' '[{"op":"add","path":"/fields/System.Tags","value":"Synthetic"}]' > /dev/null || fail "ado-rest work item PATCH failed"
 assert_equal 'Content-Type: application/json-patch+json' "$(cat "$ADO_TEST_CURL_CONTENT_TYPE_FILE")" "ado-rest work item PATCH content type"
+PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" POST '/_apis/wit/workitems/$Task?api-version=7.1' '[{"op":"add","path":"/fields/System.Title","value":"Synthetic"}]' > /dev/null || fail "ado-rest work item POST failed"
+assert_equal 'Content-Type: application/json-patch+json' "$(cat "$ADO_TEST_CURL_CONTENT_TYPE_FILE")" "ado-rest work item create content type"
+PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" POST '/_apis/wit/workitems/123/comments?api-version=7.1-preview.4' '{"text":"Synthetic"}' > /dev/null || fail "ado-rest work item comment POST failed"
+assert_equal 'Content-Type: application/json' "$(cat "$ADO_TEST_CURL_CONTENT_TYPE_FILE")" "ado-rest work item comment POST content type"
+PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" POST '/_apis/git/repositories/script-repo/pullrequests?api-version=7.1' '{"title":"Synthetic"}' > /dev/null || fail "ado-rest PR POST failed"
+assert_equal 'Content-Type: application/json' "$(cat "$ADO_TEST_CURL_CONTENT_TYPE_FILE")" "ado-rest non-work-item POST content type"
 PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" PATCH '/_apis/git/repositories/script-repo/pullrequests/123?api-version=7.1' '{"title":"Synthetic"}' > /dev/null || fail "ado-rest PR PATCH failed"
 assert_equal 'Content-Type: application/json' "$(cat "$ADO_TEST_CURL_CONTENT_TYPE_FILE")" "ado-rest non-work-item PATCH content type"
 export ADO_TEST_CURL_MODE=empty-success
