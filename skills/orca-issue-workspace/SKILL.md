@@ -48,7 +48,7 @@ gh-auth issue create --title "<type>(<scope>): <summary>" \
 orca worktree create \
   --repo path:<absolute path of the primary checkout> \
   --name "<type>: <short title> (#<N>)" \
-  --issue <N> --base-branch main \
+  --issue <N> --base-branch <default branch> \
   --no-parent --activate --json
 ```
 
@@ -59,7 +59,9 @@ orca worktree set --worktree issue:<N> --no-parent --json
 orca worktree list      # parentWorktreeId must be null; main's childWorktreeIds empty
 ```
 
-- The checkout is created from `--base-branch` (state the base commit in your report). The branch and path are chosen by Orca; read them from the JSON result.
+- Use the repository's default branch for `--base-branch`; look it up (for example `git symbolic-ref --short refs/remotes/origin/HEAD`) instead of assuming `main`.
+- Do not discard the command's stderr or filter its JSON down to success fields. If creation fails, report the error class and message (unknown base branch, missing issue, runtime unreachable) rather than retrying blindly.
+- The checkout is created from `--base-branch` (state the base commit in your report). The branch and path are chosen by Orca; read them from the JSON result. Orca prefixes the local branch with the user name (`<user>/<name>`), so never type the branch name by hand: read it with `git branch --show-current`.
 - Do not pass `--agent` here unless the owner already told you which agent to start; launching is a separate step (3).
 
 For a tracker or brief-only task, omit `--issue`, choose a suitable name and base branch, and address it as `path:<worktree path>` (from the JSON result) instead of `issue:<N>` in the commands below.
@@ -141,7 +143,7 @@ The host shell may be zsh: quote every operand, compare strings with `[ "$a" != 
 - Review the real diff, not the summary: confirm only allowed files changed, the content matches the brief, nothing private was added, and required checks ran. Review authorization boundaries, forbidden writes, error paths and risky tests. Re-run the project checks yourself in the engineer's worktree before approving a push.
 - If the engineer cannot reach the tracker because of network or token access, it skips tracker backlink and status steps and reports why; after verifying the PR, the lead performs those steps under the owner's authorization.
 - Before pushing to an existing PR branch, re-check that the PR is still open. If it merged, follow the new-branch and cherry-pick procedure above.
-- Reply to the engineer in its own terminal with `orca terminal send --enter`: approve the plan, request changes, or authorize the push. Authorize only what the owner already authorized (for example "push the feature branch and open the PR"; never `main`, never force-push, never merge). Put the exact title, the skill to follow, the content rules (no AI attribution) and "if `gh-auth --check` is not ok, stop and tell me" in that one message.
+- Reply to the engineer in its own terminal with `orca terminal send --enter`: approve the plan, request changes, or authorize the push. Authorize only what the owner already authorized (for example "push the feature branch and open the PR"; never `main`, never force-push, never merge). Tell it to push with `git push -u origin HEAD` and open the PR with `--head "$(git branch --show-current)"`, since the prefixed local branch name differs from the one in the brief. Put the exact title, the skill to follow, the content rules (no AI attribution) and "if `gh-auth --check` is not ok, stop and tell me" in that one message.
 - Merging and deploying are the owner's call. Squash-merge only on an explicit instruction, guarded with `--match-head-commit <sha>`; then comment on and close the issue only if the owner asked.
 
 ## 6. Close out
@@ -165,6 +167,8 @@ After authorized work is pushed, close the agent's terminals with `orca terminal
 | PR already merged | Start from the up-to-date default branch and cherry-pick the relevant commits onto a new branch |
 | Branch checked out in another worktree | Switch that clean checkout away first; ask if it has uncommitted changes |
 | Orca branch has a user prefix or no upstream | Push the intended branch with `git push origin HEAD:<branch>` |
+| Agent's push or `pr create` fails with an unknown branch | It used the unprefixed name from the brief: `git push -u origin HEAD`, and `--head "$(git branch --show-current)"` for the PR |
+| `orca worktree create` fails right away on a repository whose default branch is not `main` | `--base-branch main` was assumed: pass the repository default branch, and read the error instead of filtering it away |
 | Pushed to a merged PR's branch | Re-check PR state before every push; use a new branch if merged |
 
 ## 8. Report to the owner
