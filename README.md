@@ -490,13 +490,19 @@ ado-tasks --current --type Task --type Bug --state Active --json
 Choose exactly one of `--iteration <path>` or `--current`. The latter uses
 `@CurrentIteration` with the API's team context; macro support can vary outside
 the web portal, so verify it in your environment or use an explicit path. By
-default the query excludes states in the `Completed`, `Removed`, and
-`Resolved` categories, resolved from the project's work item types. If that
-request fails or returns an unexpected shape, it falls back to excluding
-`Closed`, `Done`, `Removed`, `Completed`, `Resolved`, and `Rejected`. Repeat
-`--state <name>` to replace that exclusion with an explicit include list, and
-repeat `--type <name>` to filter work item types. If `--current` returns no items,
-an empty current iteration list produces a note that no iteration is configured;
+default, the query excludes only states in the `Completed` and `Removed`
+categories. It builds that exclusion per work item type from one work item types
+request, so a state name that is completed for one type remains visible for a
+type where it is in progress. A type missing from the response has no exclusion
+clause, so its items remain visible. If the request fails, returns an unexpected
+shape, or contains no `Completed` or `Removed` states, the query falls back to
+excluding the names `Closed`, `Done`, `Removed`, `Completed`, and `Rejected`
+across types. Repeat `--state <name>` to replace that exclusion with an explicit
+include list, and repeat `--type <name>` to filter work item types. A team's
+configured current iteration can differ from the iteration the caller is focused
+on; pass `--iteration <path>` when a specific iteration is needed. If `--current`
+returns no items, an empty current iteration list produces a note that no
+iteration is configured;
 a failed request or unexpected response produces a note that the iteration could
 not be resolved. Both notes suggest `--iteration <path>`.
 

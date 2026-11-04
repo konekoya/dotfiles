@@ -67,32 +67,49 @@ wiql_literal() {
 }
 
 fallback_completed_states() {
-  printf '%s\n' 'Closed' 'Done' 'Removed' 'Completed' 'Resolved' 'Rejected'
+  printf '%s\n' 'Closed' 'Done' 'Removed' 'Completed' 'Rejected'
 }
 
-completed_states() {
-  local response
+default_state_exclusion() {
+  local response separator values state
 
   response="$(http_json -H "$ADO_AUTH_HEADER" \
-    "${base_url}/workitemtypes?api-version=7.1" 2>/dev/null)" || {
-    fallback_completed_states
-    return
-  }
+    "${base_url}/workitemtypes?api-version=7.1" 2>/dev/null)" || response=""
   if ! printf '%s' "$response" | jq -e '
     (.value | type == "array" and length > 0) and
-    all(.value[]; (.states | type == "array") and
+    all(.value[]; (.name | type == "string" and length > 0) and
+      (.states | type == "array") and
       all(.states[]; (.name | type == "string" and length > 0) and
-        (.category | type == "string" and length > 0))) and
-    ([.value[].states[] | select(.category == "Completed" or .category == "Removed" or .category == "Resolved")] | length > 0)
+        (.category | type == "string" and length > 0)))
   ' >/dev/null 2>&1; then
-    fallback_completed_states
+    response=""
+  elif ! printf '%s' "$response" | jq -e '
+    [.value[].states[] | select(.category == "Completed" or .category == "Removed")] | length > 0
+  ' >/dev/null 2>&1; then
+    response=""
+  fi
+  if [ -z "$response" ]; then
+    separator=""
+    values=""
+    while IFS= read -r state; do
+      [ -n "$state" ] || continue
+      values="$values$separator$(wiql_literal "$state")"
+      separator=', '
+    done <<< "$(fallback_completed_states)"
+    printf '[System.State] NOT IN (%s)' "$values"
     return
   fi
-  if ! printf '%s' "$response" | jq -r '
-    [.value[].states[] | select(.category == "Completed" or .category == "Removed" or .category == "Resolved") | .name] | unique[]
-  ' 2>/dev/null; then
-    fallback_completed_states
-  fi
+  printf '%s' "$response" | jq -r '
+    def literal: "\u0027" + (gsub("\u0027"; "\u0027\u0027")) + "\u0027";
+    [
+      .value[]
+      | .name as $type
+      | [.states[] | select(.category == "Completed" or .category == "Removed") | .name] as $states
+      | select($states | length > 0)
+      | "([System.WorkItemType] <> " + ($type | literal) +
+        " OR [System.State] NOT IN (" + ([$states[] | literal] | join(", ")) + "))"
+    ] | join(" AND ")
+  '
 }
 
 resolve_current_iteration() {
@@ -133,15 +150,7 @@ else
   query="$query AND [System.IterationPath] = $(wiql_literal "$iteration")"
 fi
 if [ "${#states[@]}" -eq 0 ]; then
-  excluded_states="$(completed_states)"
-  separator=""
-  values=""
-  while IFS= read -r state; do
-    [ -n "$state" ] || continue
-    values="$values$separator$(wiql_literal "$state")"
-    separator=', '
-  done <<< "$excluded_states"
-  query="$query AND [System.State] NOT IN ($values)"
+  query="$query AND $(default_state_exclusion)"
 else
   separator=""
   values=""

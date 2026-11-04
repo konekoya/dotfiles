@@ -22,6 +22,10 @@ git -C "$TMP/repo" config azure-devops.test.organization example
 cd "$TMP/repo"
 CLI="$TMP/dotfiles/scripts/ado-tasks"
 
+query_has() {
+  jq -r '.query' "$TMP/query.json" | grep -Fq "$1"
+}
+
 cat > "$TMP/bin/curl" <<'MOCK'
 #!/bin/bash
 set -euo pipefail
@@ -46,9 +50,16 @@ done
 if [ "${TEST_FAIL:-}" = yes ]; then printf '\n500'; exit 0; fi
 case "$url" in
   */workitemtypes\?*)
+    printf 'types\n' >> "$TEST_DIR/requests.log"
     if [ "${TEST_STATES_FAIL:-}" = yes ]; then printf '\n503'; exit 0; fi
     if [ "${TEST_STATES_MISSING_CATEGORY:-}" = yes ]; then
       jq -n '{value: [{name: "Task", states: [{name: "Rejected"}, {name: "Active", category: "Proposed"}]}]}'
+    elif [ "${TEST_STATES_EMPTY_EXCLUSIONS:-}" = yes ]; then
+      jq -n '{value: [{name: "Task", states: [{name: "Active", category: "Proposed"}]}, {name: "Bug", states: [{name: "Waiting", category: "InProgress"}]}]}'
+    elif [ "${TEST_STATES_PER_TYPE:-}" = yes ]; then
+      jq -n '{value: [{name: "Task", states: [{name: "Waiting QA", category: "Resolved"}, {name: "Closed", category: "Completed"}, {name: "Active", category: "InProgress"}]}, {name: "Bug", states: [{name: "Waiting QA", category: "InProgress"}, {name: "Closed", category: "InProgress"}]}, {name: "Epic", states: [{name: "Done", category: "Completed"}]}, {name: "Feature", states: [{name: "Proposed", category: "Proposed"}]}]}'
+    elif [ "${TEST_STATES_APOSTROPHE:-}" = yes ]; then
+      jq -n '{value: [{name: "O\u0027Brien", states: [{name: "Owner\u0027s Done", category: "Completed"}]}]}'
     else
       jq -n '{value: [{name: "Task", states: [{name: "Active", category: "Proposed"}, {name: "Rejected", category: "Completed"}, {name: "Removed", category: "Removed"}]}]}'
     fi
@@ -88,7 +99,10 @@ jq -e '.query | contains("[System.TeamProject] = @project") and contains("[Syste
 grep -q '^Iteration: Project\\Sprint$' "$TMP/out"
 [ "$(cat "$TMP/current-url")" = 'https://dev.azure.com/example/project/_apis/work/teamsettings/iterations?api-version=7.1&timeframe=current' ]
 [ "$(wc -l < "$TMP/out" | tr -d ' ')" = 3 ]
-jq -e '.query | contains("[System.IterationPath] = @CurrentIteration") and contains("NOT IN ('\''Rejected'\'', '\''Removed'\'')")' "$TMP/query.json" >/dev/null
+query_has '[System.IterationPath] = @CurrentIteration'
+query_has "[System.WorkItemType] <> 'Task'"
+query_has "[System.State] NOT IN ('Rejected', 'Removed')"
+[ "$(cat "$TMP/requests.log")" = types ]
 "$CLI" --current --json > "$TMP/out"
 jq -e '.iteration == "Project\\Sprint"' "$TMP/out" >/dev/null
 TEST_COUNT=0 TEST_NO_CURRENT=yes "$CLI" --current > "$TMP/out" 2> "$TMP/err"
@@ -101,9 +115,18 @@ if grep -q 'no current iteration configured' "$TMP/err"; then exit 1; fi
 TEST_COUNT=0 TEST_CURRENT_BAD_SHAPE=yes "$CLI" --current > "$TMP/out" 2> "$TMP/err"
 grep -q 'Could not resolve the team current iteration; use --iteration <path>' "$TMP/err"
 TEST_STATES_FAIL=yes "$CLI" --iteration 'Project\Sprint' > "$TMP/out"
-jq -e '.query | contains("NOT IN ('\''Closed'\'', '\''Done'\'', '\''Removed'\'', '\''Completed'\'', '\''Resolved'\'', '\''Rejected'\'')")' "$TMP/query.json" >/dev/null
+query_has "[System.State] NOT IN ('Closed', 'Done', 'Removed', 'Completed', 'Rejected')"
+if query_has 'Resolved'; then exit 1; fi
 TEST_STATES_MISSING_CATEGORY=yes "$CLI" --iteration 'Project\Sprint' > "$TMP/out"
-jq -e '.query | contains("NOT IN ('\''Closed'\'', '\''Done'\'', '\''Removed'\'', '\''Completed'\'', '\''Resolved'\'', '\''Rejected'\'')")' "$TMP/query.json" >/dev/null
+query_has "[System.State] NOT IN ('Closed', 'Done', 'Removed', 'Completed', 'Rejected')"
+TEST_STATES_EMPTY_EXCLUSIONS=yes "$CLI" --iteration 'Project\Sprint' > "$TMP/out"
+query_has "[System.State] NOT IN ('Closed', 'Done', 'Removed', 'Completed', 'Rejected')"
+TEST_STATES_PER_TYPE=yes "$CLI" --iteration 'Project\Sprint' > "$TMP/out"
+query_has "([System.WorkItemType] <> 'Task' OR [System.State] NOT IN ('Closed')) AND ([System.WorkItemType] <> 'Epic' OR [System.State] NOT IN ('Done'))"
+if query_has "Waiting QA" || query_has "[System.WorkItemType] <> 'Bug'" || query_has "[System.WorkItemType] <> 'Feature'" || query_has "[System.WorkItemType] <> 'Missing'"; then exit 1; fi
+TEST_STATES_APOSTROPHE=yes "$CLI" --iteration 'Project\Sprint' > "$TMP/out"
+query_has "[System.WorkItemType] <> 'O''Brien'"
+query_has "[System.State] NOT IN ('Owner''s Done')"
 TEST_COUNT=1 "$CLI" --iteration 'Project\Sprint' > "$TMP/out"
 [ "$(sed -n '1p' "$TMP/out")" = 'Iteration: Project\Sprint' ]
 [ "$(sed -n '2p' "$TMP/out" | cut -f5)" = 'Project\Sprint' ]
