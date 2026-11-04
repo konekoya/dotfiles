@@ -1,0 +1,133 @@
+#!/bin/bash
+# Description: List assigned Azure DevOps work items in an iteration
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../lib/azure-devops.sh"
+source "$SCRIPT_DIR/../lib/http.sh"
+source "$SCRIPT_DIR/../lib/local-env.sh"
+
+usage() {
+  echo 'Usage: ado-tasks (--iteration <path> | --current) [--state <name>]... [--type <name>]... [--json]' >&2
+}
+
+iteration=""
+iteration_mode=""
+json=false
+states=()
+types=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --help) usage; exit 0 ;;
+    --json) json=true; shift ;;
+    --current)
+      [ -z "$iteration_mode" ] || { usage; exit 2; }
+      iteration_mode=current
+      iteration='@CurrentIteration'
+      shift
+      ;;
+    --iteration|--state|--type)
+      option="$1"
+      [ "$#" -ge 2 ] && [ -n "$2" ] || { usage; exit 2; }
+      case "$2" in --*|*$'\n'*|*$'\r'*|*$'\t'*) usage; exit 2 ;; esac
+      case "$option" in
+        --iteration)
+          [ -z "$iteration_mode" ] || { usage; exit 2; }
+          iteration_mode=path
+          iteration="$2"
+          ;;
+        --state) states+=("$2") ;;
+        --type) types+=("$2") ;;
+      esac
+      shift 2
+      ;;
+    *) usage; exit 2 ;;
+  esac
+done
+[ -n "$iteration_mode" ] || { usage; exit 2; }
+
+for cmd in jq curl; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "❌ '$cmd' is required." >&2; exit 1; }
+done
+if ! ado_resolve_repo_context; then
+  echo "❌ ${ADO_CONTEXT_ERROR}" >&2
+  exit 1
+fi
+if ! ado_get_auth_header; then
+  echo "❌ ${ADO_AUTH_ERROR}" >&2
+  exit 1
+fi
+
+# WIQL escapes a quote in a string literal by doubling it.
+wiql_literal() {
+  local value="$1"
+  value="$(printf '%s' "$value" | sed "s/'/''/g")"
+  printf "'%s'" "$value"
+}
+
+query='SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.AssignedTo] = @Me'
+if [ "$iteration_mode" = current ]; then
+  query="$query AND [System.IterationPath] = @CurrentIteration"
+else
+  query="$query AND [System.IterationPath] = $(wiql_literal "$iteration")"
+fi
+if [ "${#states[@]}" -eq 0 ]; then
+  query="$query AND [System.State] NOT IN ('Closed', 'Done', 'Removed', 'Completed', 'Resolved')"
+else
+  separator=""
+  values=""
+  for state in "${states[@]}"; do
+    values="$values$separator$(wiql_literal "$state")"
+    separator=', '
+  done
+  query="$query AND [System.State] IN ($values)"
+fi
+if [ "${#types[@]}" -gt 0 ]; then
+  separator=""
+  values=""
+  for type in "${types[@]}"; do
+    values="$values$separator$(wiql_literal "$type")"
+    separator=', '
+  done
+  query="$query AND [System.WorkItemType] IN ($values)"
+fi
+
+base_url="https://dev.azure.com/${ADO_ORG_PATH}/${ADO_PROJECT_PATH}/_apis/wit"
+body="$(jq -n --arg query "$query" '{query: $query}')"
+response="$(http_json -X POST -H "$ADO_AUTH_HEADER" -H 'Content-Type: application/json' \
+  "$base_url/wiql?api-version=7.1" -d "$body")" || exit 1
+if ! printf '%s' "$response" | jq -e '
+  .workItems | type == "array" and all(.[]; (.id | type == "number" and . > 0 and floor == .))
+' >/dev/null 2>&1; then
+  echo '❌ API request returned an invalid work item query result.' >&2
+  exit 1
+fi
+ids="$(printf '%s' "$response" | jq -c '[.workItems[].id]')"
+count="$(printf '%s' "$ids" | jq 'length')"
+items='[]'
+offset=0
+while [ "$offset" -lt "$count" ]; do
+  batch="$(printf '%s' "$ids" | jq -c --argjson offset "$offset" '.[$offset:$offset + 200]')"
+  body="$(jq -n --argjson ids "$batch" '{ids: $ids, fields: ["System.Id", "System.WorkItemType", "System.Title", "System.State", "System.IterationPath"]}')"
+  response="$(http_json -X POST -H "$ADO_AUTH_HEADER" -H 'Content-Type: application/json' \
+    "$base_url/workitemsbatch?api-version=7.1" -d "$body")" || exit 1
+  if ! printf '%s' "$response" | jq -e --argjson ids "$batch" '
+    .value | type == "array" and length == ($ids | length) and
+    ([.[].id] | sort) == ($ids | sort) and
+    all(.[]; (.id | type == "number") and
+      (.fields | type == "object" and
+        ([.["System.WorkItemType"], .["System.Title"], .["System.State"], .["System.IterationPath"]] | all(.[]; type == "string"))))
+  ' >/dev/null 2>&1; then
+    echo '❌ API request returned invalid work item details.' >&2
+    exit 1
+  fi
+  items="$(jq -cn --argjson items "$items" --argjson response "$response" '$items + [$response.value[] | {id: .id, type: .fields["System.WorkItemType"], title: .fields["System.Title"], state: .fields["System.State"], iteration: .fields["System.IterationPath"]}]')"
+  offset=$((offset + 200))
+done
+if [ "$json" = true ]; then
+  jq -n --arg iteration "$iteration" --argjson items "$items" '{iteration: $iteration, items: $items}'
+else
+  printf 'Iteration: %s\n' "$iteration"
+  printf '%s' "$items" | jq -r '.[] | [.id, .type, .title, .state, .iteration] | @tsv'
+fi

@@ -473,6 +473,31 @@ Use only Azure DevOps API paths under `/_apis/`. `POST`, `PATCH`, and `PUT`
 require an explicit JSON body; `DELETE` may omit it. The command validates the
 fetch/push remote pair and profile before sending a request.
 
+### `ado-tasks`
+
+Lists work items assigned to the authenticated user in the selected repository's
+Azure DevOps project and iteration. It uses the same repository profile and
+private authentication header transport as `ado-rest`.
+
+```sh
+ado-tasks --iteration 'Example\Sprint 1'
+ado-tasks --current --type Task --type Bug --state Active --json
+```
+
+Choose exactly one of `--iteration <path>` or `--current`. The latter uses
+`@CurrentIteration` with the API's team context; macro support can vary outside
+the web portal, so verify it in your environment or use an explicit path. By
+default the query excludes `Closed`, `Done`, `Removed`, `Completed`, and
+`Resolved`. Repeat `--state <name>` to replace that exclusion with an explicit
+include list, and repeat `--type <name>` to filter work item types. Custom process
+states may require an explicit state list.
+
+Text output starts with the selected iteration and lists ID, type, title, state,
+and iteration as tab-separated fields (tabs, newlines, carriage returns, and
+backslashes are escaped). `--json`
+returns an object with `iteration` and an `items` array of those same fields.
+The command is read-only and requires `jq` and `curl`.
+
 ### `pr`
 
 Lists, inspects and merges pull requests or opens the current PR. Azure DevOps
@@ -862,8 +887,8 @@ See [agent tooling](agents/tooling.md) for discovery and integration guidance.
 |------|-------------|---------|
 | `delta` | git diff pager | `brew install git-delta` |
 | `fzf` | `cmds`, `track-branch`, `image-shrink` picker (optional; all have Bash fallbacks); shell key bindings in `zsh/.zshrc.shared` (0.48+, optional) | `brew install fzf` |
-| `jq` | `pr`, `submit-pr`, `ado-rest`, `clickup`; optional PR lookup in `pr open` | `brew install jq` |
-| `curl` | `pr`, `submit-pr`, `ado-rest`, `clickup`; optional PR lookup in `pr open` | usually pre-installed |
+| `jq` | `pr`, `submit-pr`, `ado-rest`, `ado-tasks`, `clickup`; optional PR lookup in `pr open` | `brew install jq` |
+| `curl` | `pr`, `submit-pr`, `ado-rest`, `ado-tasks`, `clickup`; optional PR lookup in `pr open` | usually pre-installed |
 | `az` | Azure DevOps profiles configured with `auth = azure-cli` | `brew install --cask azure-cli` |
 | `gh` | `gh-auth` and the GitHub skills; optional GitHub auth for `pr open` | `brew install gh` |
 | `starship` | shared prompt (`zsh/starship.toml`); needs a Nerd Font, falls back to the oh-my-zsh theme without it | `brew install starship` |
