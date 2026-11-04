@@ -237,6 +237,36 @@ retire_repository_skill_link() {
   fi
 }
 
+# Retire a renamed skill only after its replacement is linked and usable.
+# Preserve custom old entries and any old link still needed by a blocked install.
+retire_renamed_skill_link() {
+  local target_dir="$1"
+  local label="$2"
+  local old_name="$3"
+  local new_name="$4"
+  local old_target="$target_dir/$old_name"
+
+  [ -e "$old_target" ] || [ -L "$old_target" ] || return 0
+
+  if ! symlink_points_to_path "$old_target" "$SKILLS_SOURCE/$old_name" && \
+    ! symlink_points_to_path "$old_target" "$LEGACY_SKILLS_SOURCE/$old_name"; then
+    echo "⚠️  $old_target is customized; preserving it. Use $new_name for the replacement skill."
+    return 0
+  fi
+
+  if [ ! -f "$SKILLS_SOURCE/$new_name/SKILL.md" ] || \
+    ! symlink_points_to_path "$target_dir/$new_name" "$SKILLS_SOURCE/$new_name"; then
+    echo "⚠️  Preserving $old_target until $new_name is linked and usable."
+    return 0
+  fi
+
+  if unlink "$old_target"; then
+    echo "🤖 Removed renamed $label skill link $old_name; use $new_name."
+  else
+    echo "⚠️  Could not remove renamed $label skill link $old_target."
+  fi
+}
+
 # Link only repository-managed skills. Tool-managed entries and real directories
 # are left untouched.
 link_skills_individually() {
@@ -302,20 +332,8 @@ link_skills_individually() {
     fi
   done
 
-  # Retire only our old PR skill link, and only after its replacement is usable.
-  # Preserve user-owned directories and links to any other source.
-  if [ -f "$SKILLS_SOURCE/create-pr/SKILL.md" ] && \
-    symlink_points_to_path "$target_dir/create-pr" "$SKILLS_SOURCE/create-pr"; then
-    legacy_skill="$target_dir/create-azure-pr"
-    if symlink_points_to_path "$legacy_skill" "$SKILLS_SOURCE/create-azure-pr" || \
-      symlink_points_to_path "$legacy_skill" "$LEGACY_SKILLS_SOURCE/create-azure-pr"; then
-      if unlink "$legacy_skill"; then
-        echo "🤖 Removed renamed $label skill link create-azure-pr; use create-pr."
-      else
-        echo "⚠️  Could not remove renamed $label skill link $legacy_skill."
-      fi
-    fi
-  fi
+  retire_renamed_skill_link "$target_dir" "$label" create-azure-pr create-pr
+  retire_renamed_skill_link "$target_dir" "$label" sync-work-notes end-work
 
   # Per-skill lines are only for changes and problems; summarize the rest.
   if [ "$already_linked" -gt 0 ]; then

@@ -200,6 +200,127 @@ run_installer >> "$TEST_CASE_DIR/output" 2>&1 || fail "repeated broken replaceme
 assert_link_target "$TEST_HOME/.agents/skills/create-pr" "$TEST_CASE_DIR/missing-custom-skill"
 assert_link_target "$TEST_HOME/.agents/skills/create-azure-pr" "$TEST_DOTFILES/skills/create-azure-pr"
 
+# end-work replaces sync-work-notes for every supported tool. Fresh installs
+# and absolute, relative, legacy, and chained old links stay safe on repeat runs.
+for link_style in fresh absolute relative legacy chained; do
+  setup_fixture "end-work-$link_style"
+  mkdir -p "$TEST_DOTFILES/skills/end-work" "$TEST_DOTFILES/claude/skills" || fail "could not prepare end-work source"
+  cp "$REPO_ROOT/skills/end-work/SKILL.md" "$TEST_DOTFILES/skills/end-work/" || fail "could not copy end-work"
+  ln -s "$TEST_DOTFILES/skills" "$TEST_CASE_DIR/source-skills" || fail "could not prepare chained source"
+  for tool in .claude .copilot .agents; do
+    mkdir -p "$TEST_HOME/$tool/skills" || fail "could not prepare tool skills"
+    case "$link_style" in
+      fresh) continue ;;
+      absolute) link_target="$TEST_DOTFILES/skills/sync-work-notes" ;;
+      relative) link_target="../../dotfiles/skills/sync-work-notes" ;;
+      legacy) link_target="../../dotfiles/claude/skills/sync-work-notes" ;;
+      chained) link_target="$TEST_CASE_DIR/source-skills/sync-work-notes" ;;
+    esac
+    ln -s "$link_target" "$TEST_HOME/$tool/skills/sync-work-notes" || fail "could not prepare old notes link"
+  done
+  run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "end-work installation failed"
+  for tool in .claude .copilot .agents; do
+    assert_link_target "$TEST_HOME/$tool/skills/end-work" "$TEST_DOTFILES/skills/end-work"
+    [ -f "$TEST_HOME/$tool/skills/end-work/SKILL.md" ] || fail "end-work is not usable"
+    [ ! -e "$TEST_HOME/$tool/skills/sync-work-notes" ] && \
+      [ ! -L "$TEST_HOME/$tool/skills/sync-work-notes" ] || fail "old notes link remains"
+  done
+  if [ "$link_style" != fresh ]; then
+    [ "$(grep -c 'skill link sync-work-notes; use end-work' "$TEST_CASE_DIR/output")" -eq 3 ] || fail "notes link migration was not reported for every tool"
+  fi
+  run_installer > "$TEST_CASE_DIR/second-output" 2>&1 || fail "repeated end-work installation failed"
+  for tool in .claude .copilot .agents; do
+    assert_link_target "$TEST_HOME/$tool/skills/end-work" "$TEST_DOTFILES/skills/end-work"
+    [ ! -L "$TEST_HOME/$tool/skills/sync-work-notes" ] || fail "old notes link returned"
+  done
+  grep -Fq sync-work-notes "$TEST_CASE_DIR/second-output" && fail "retired notes link was reported on repeat installation"
+done
+
+# Customized old files, directories, and external links are preserved with a
+# warning, including broken external links, while the replacement is installed.
+for old_kind in file directory link broken-link; do
+  setup_fixture "end-work-custom-$old_kind"
+  mkdir -p "$TEST_DOTFILES/skills/end-work" "$TEST_CASE_DIR/custom-skill" || fail "could not prepare custom notes fixture"
+  cp "$REPO_ROOT/skills/end-work/SKILL.md" "$TEST_DOTFILES/skills/end-work/" || fail "could not copy end-work"
+  for tool in .claude .copilot .agents; do
+    mkdir -p "$TEST_HOME/$tool/skills" || fail "could not prepare custom tool skills"
+    old_target="$TEST_HOME/$tool/skills/sync-work-notes"
+    case "$old_kind" in
+      file) printf 'custom notes skill\n' > "$old_target" ;;
+      directory)
+        mkdir -p "$old_target" || fail "could not prepare custom notes directory"
+        printf 'custom notes skill\n' > "$old_target/SKILL.md"
+        ;;
+      link) ln -s "$TEST_CASE_DIR/custom-skill" "$old_target" || fail "could not prepare external notes link" ;;
+      broken-link) ln -s "$TEST_CASE_DIR/missing-skill" "$old_target" || fail "could not prepare broken notes link" ;;
+    esac
+  done
+  run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "custom notes installation failed"
+  run_installer >> "$TEST_CASE_DIR/output" 2>&1 || fail "repeated custom notes installation failed"
+  for tool in .claude .copilot .agents; do
+    old_target="$TEST_HOME/$tool/skills/sync-work-notes"
+    assert_link_target "$TEST_HOME/$tool/skills/end-work" "$TEST_DOTFILES/skills/end-work"
+    case "$old_kind" in
+      file) [ "$(cat "$old_target")" = 'custom notes skill' ] || fail "custom old notes file changed" ;;
+      directory) [ "$(cat "$old_target/SKILL.md")" = 'custom notes skill' ] || fail "custom old notes directory changed" ;;
+      link) assert_link_target "$old_target" "$TEST_CASE_DIR/custom-skill" ;;
+      broken-link) assert_link_target "$old_target" "$TEST_CASE_DIR/missing-skill" ;;
+    esac
+    grep -Fq "$old_target is customized; preserving it." "$TEST_CASE_DIR/output" || fail "custom old notes entry was not reported"
+  done
+done
+
+# A conflicting replacement, missing SKILL.md, or failed link creation must
+# never retire the installer's old link. Mock only the failing link operation.
+for replacement_kind in file directory broken-link missing-source failed-link; do
+  setup_fixture "end-work-blocked-$replacement_kind"
+  mkdir -p "$TEST_DOTFILES/skills/end-work" || fail "could not prepare blocked notes source"
+  if [ "$replacement_kind" != missing-source ]; then
+    cp "$REPO_ROOT/skills/end-work/SKILL.md" "$TEST_DOTFILES/skills/end-work/" || fail "could not copy end-work"
+  fi
+  for tool in .claude .copilot .agents; do
+    mkdir -p "$TEST_HOME/$tool/skills" || fail "could not prepare blocked tool skills"
+    ln -s "$TEST_DOTFILES/skills/sync-work-notes" "$TEST_HOME/$tool/skills/sync-work-notes" || fail "could not prepare blocked old notes link"
+    new_target="$TEST_HOME/$tool/skills/end-work"
+    case "$replacement_kind" in
+      file) printf 'custom replacement\n' > "$new_target" ;;
+      directory)
+        mkdir -p "$new_target" || fail "could not prepare custom replacement directory"
+        printf 'custom replacement\n' > "$new_target/SKILL.md"
+        ;;
+      broken-link) ln -s "$TEST_CASE_DIR/missing-skill" "$new_target" || fail "could not prepare broken replacement link" ;;
+    esac
+  done
+  if [ "$replacement_kind" = failed-link ]; then
+    mkdir -p "$TEST_CASE_DIR/bin" || fail "could not prepare failing ln mock"
+    REAL_LN="$(command -v ln)"
+    export REAL_LN
+    cat > "$TEST_CASE_DIR/bin/ln" <<'EOF'
+#!/bin/bash
+case "$*" in
+  */skills/end-work*) exit 1 ;;
+esac
+exec "$REAL_LN" "$@"
+EOF
+    chmod +x "$TEST_CASE_DIR/bin/ln" || fail "could not make ln mock executable"
+    INSTALL_TEST_PATH="$TEST_CASE_DIR/bin:$PATH"
+  fi
+  run_installer > "$TEST_CASE_DIR/output" 2>&1 || fail "blocked end-work installation failed"
+  run_installer >> "$TEST_CASE_DIR/output" 2>&1 || fail "repeated blocked end-work installation failed"
+  unset INSTALL_TEST_PATH REAL_LN
+  for tool in .claude .copilot .agents; do
+    assert_link_target "$TEST_HOME/$tool/skills/sync-work-notes" "$TEST_DOTFILES/skills/sync-work-notes"
+    new_target="$TEST_HOME/$tool/skills/end-work"
+    case "$replacement_kind" in
+      file) [ "$(cat "$new_target")" = 'custom replacement' ] || fail "custom replacement file changed" ;;
+      directory) [ "$(cat "$new_target/SKILL.md")" = 'custom replacement' ] || fail "custom replacement directory changed" ;;
+      broken-link) assert_link_target "$new_target" "$TEST_CASE_DIR/missing-skill" ;;
+      *) [ ! -e "$new_target" ] && [ ! -L "$new_target" ] || fail "unusable replacement was created" ;;
+    esac
+    grep -Fq "Preserving $TEST_HOME/$tool/skills/sync-work-notes until end-work is linked and usable." "$TEST_CASE_DIR/output" || fail "blocked notes migration was not reported"
+  done
+done
+
 # skill-creator ships with a Claude Code plugin: it is linked for the other
 # tools only, and an existing installer-owned Claude link is retired. Custom
 # Claude entries survive.
