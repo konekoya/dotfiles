@@ -487,15 +487,22 @@ ado-tasks --current --type Task --type Bug --state Active --json
 Choose exactly one of `--iteration <path>` or `--current`. The latter uses
 `@CurrentIteration` with the API's team context; macro support can vary outside
 the web portal, so verify it in your environment or use an explicit path. By
-default the query excludes `Closed`, `Done`, `Removed`, `Completed`, and
-`Resolved`. Repeat `--state <name>` to replace that exclusion with an explicit
-include list, and repeat `--type <name>` to filter work item types. Custom process
-states may require an explicit state list.
+default the query excludes states in the `Completed`, `Removed`, and
+`Resolved` categories, resolved from the project's work item types. If that
+request fails or returns an unexpected shape, it falls back to excluding
+`Closed`, `Done`, `Removed`, `Completed`, `Resolved`, and `Rejected`. Repeat
+`--state <name>` to replace that exclusion with an explicit include list, and
+repeat `--type <name>` to filter work item types. If `--current` returns no items,
+an empty current iteration list produces a note that no iteration is configured;
+a failed request or unexpected response produces a note that the iteration could
+not be resolved. Both notes suggest `--iteration <path>`.
 
-Text output starts with the selected iteration and lists ID, type, title, state,
-and iteration as tab-separated fields (tabs, newlines, carriage returns, and
-backslashes are escaped). `--json`
-returns an object with `iteration` and an `items` array of those same fields.
+Text output starts with the selected iteration (the resolved path for
+`--current`, when available) and lists ID, type, title, state, and iteration as
+tab-separated fields. Tabs, newlines, and carriage returns inside fields become
+spaces; backslashes are preserved. `--json` returns an object with `iteration`
+and an `items` array of those same fields; its `iteration` uses the resolved
+path when available.
 The command is read-only and requires `jq` and `curl`.
 
 ### `pr`

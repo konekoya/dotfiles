@@ -45,6 +45,26 @@ done
 [ "$header_seen" = true ]
 if [ "${TEST_FAIL:-}" = yes ]; then printf '\n500'; exit 0; fi
 case "$url" in
+  */workitemtypes\?*)
+    if [ "${TEST_STATES_FAIL:-}" = yes ]; then printf '\n503'; exit 0; fi
+    if [ "${TEST_STATES_MISSING_CATEGORY:-}" = yes ]; then
+      jq -n '{value: [{name: "Task", states: [{name: "Rejected"}, {name: "Active", category: "Proposed"}]}]}'
+    else
+      jq -n '{value: [{name: "Task", states: [{name: "Active", category: "Proposed"}, {name: "Rejected", category: "Completed"}, {name: "Removed", category: "Removed"}]}]}'
+    fi
+    ;;
+  */teamsettings/iterations\?*)
+    printf '%s' "$url" > "$TEST_DIR/current-url"
+    [ "$url" = 'https://dev.azure.com/example/project/_apis/work/teamsettings/iterations?api-version=7.1&timeframe=current' ] || exit 11
+    if [ "${TEST_CURRENT_FAIL:-}" = yes ]; then printf '\n503'; exit 0; fi
+    if [ "${TEST_CURRENT_BAD_SHAPE:-}" = yes ]; then
+      jq -n '{value: [{name: "Sprint"}]}'
+    elif [ "${TEST_NO_CURRENT:-}" = yes ]; then
+      jq -n '{value: []}'
+    else
+      jq -n '{value: [{name: "Sprint", path: "Project\\Sprint", attributes: {timeFrame: "current"}}]}'
+    fi
+    ;;
   */wiql\?*)
     printf '%s\n' "$body" > "$TEST_DIR/query.json"
     jq -n --argjson count "${TEST_COUNT:-2}" '{workItems: [range(1; $count + 1) | {id: .}]}'
@@ -53,7 +73,7 @@ case "$url" in
     if [ "${TEST_FAIL_BATCH:-}" = yes ]; then printf '\n503'; exit 0; fi
     if [ "${TEST_BAD_BATCH:-}" = yes ]; then printf '{"value":[]}\n200'; exit 0; fi
     printf '%s\n' "$body" | jq -c . >> "$TEST_DIR/batches.jsonl"
-    printf '%s' "$body" | jq '{value: [.ids[] | {id: ., fields: {"System.WorkItemType": "Task", "System.Title": "Example", "System.State": "Active", "System.IterationPath": "Project\\Sprint"}}]}'
+    printf '%s' "$body" | jq --arg title "${MOCK_TITLE:-Example}" '{value: [.ids[] | {id: ., fields: {"System.WorkItemType": "Task", "System.Title": $title, "System.State": "Active", "System.IterationPath": "Project\\Sprint"}}]}'
     ;;
   *) exit 10 ;;
 esac
@@ -65,9 +85,32 @@ chmod +x "$TMP/bin/curl"
 jq -e '.iteration == "Project\\Sprint\u0027s" and (.items | length == 2) and .items[0] == {id:1,type:"Task",title:"Example",state:"Active",iteration:"Project\\Sprint"}' "$TMP/out" >/dev/null
 jq -e '.query | contains("[System.TeamProject] = @project") and contains("[System.AssignedTo] = @Me") and contains("[System.IterationPath] = '\''Project\\Sprint'\'''\''s'\''") and contains("[System.State] IN ('\''In Progress'\'', '\''Owner'\'''\''s Review'\'')") and contains("[System.WorkItemType] IN ('\''Task'\'', '\''Bug'\'')") and (contains("NOT IN") | not)' "$TMP/query.json" >/dev/null
 "$CLI" --current > "$TMP/out"
-grep -q '^Iteration: @CurrentIteration$' "$TMP/out"
+grep -q '^Iteration: Project\\Sprint$' "$TMP/out"
+[ "$(cat "$TMP/current-url")" = 'https://dev.azure.com/example/project/_apis/work/teamsettings/iterations?api-version=7.1&timeframe=current' ]
 [ "$(wc -l < "$TMP/out" | tr -d ' ')" = 3 ]
-jq -e '.query | contains("[System.IterationPath] = @CurrentIteration") and contains("NOT IN ('\''Closed'\'', '\''Done'\'', '\''Removed'\'', '\''Completed'\'', '\''Resolved'\'')")' "$TMP/query.json" >/dev/null
+jq -e '.query | contains("[System.IterationPath] = @CurrentIteration") and contains("NOT IN ('\''Rejected'\'', '\''Removed'\'')")' "$TMP/query.json" >/dev/null
+"$CLI" --current --json > "$TMP/out"
+jq -e '.iteration == "Project\\Sprint"' "$TMP/out" >/dev/null
+TEST_COUNT=0 TEST_NO_CURRENT=yes "$CLI" --current > "$TMP/out" 2> "$TMP/err"
+grep -q '^Iteration: @CurrentIteration$' "$TMP/out"
+grep -q 'no current iteration configured; use --iteration <path>' "$TMP/err"
+if grep -qi 'could not resolve' "$TMP/err"; then exit 1; fi
+TEST_COUNT=0 TEST_CURRENT_FAIL=yes "$CLI" --current > "$TMP/out" 2> "$TMP/err"
+grep -q 'Could not resolve the team current iteration; use --iteration <path>' "$TMP/err"
+if grep -q 'no current iteration configured' "$TMP/err"; then exit 1; fi
+TEST_COUNT=0 TEST_CURRENT_BAD_SHAPE=yes "$CLI" --current > "$TMP/out" 2> "$TMP/err"
+grep -q 'Could not resolve the team current iteration; use --iteration <path>' "$TMP/err"
+TEST_STATES_FAIL=yes "$CLI" --iteration 'Project\Sprint' > "$TMP/out"
+jq -e '.query | contains("NOT IN ('\''Closed'\'', '\''Done'\'', '\''Removed'\'', '\''Completed'\'', '\''Resolved'\'', '\''Rejected'\'')")' "$TMP/query.json" >/dev/null
+TEST_STATES_MISSING_CATEGORY=yes "$CLI" --iteration 'Project\Sprint' > "$TMP/out"
+jq -e '.query | contains("NOT IN ('\''Closed'\'', '\''Done'\'', '\''Removed'\'', '\''Completed'\'', '\''Resolved'\'', '\''Rejected'\'')")' "$TMP/query.json" >/dev/null
+TEST_COUNT=1 "$CLI" --iteration 'Project\Sprint' > "$TMP/out"
+[ "$(sed -n '1p' "$TMP/out")" = 'Iteration: Project\Sprint' ]
+[ "$(sed -n '2p' "$TMP/out" | cut -f5)" = 'Project\Sprint' ]
+[ "$(sed -n '2p' "$TMP/out" | awk -F '\t' '{print NF}')" = 5 ]
+TEST_COUNT=1 MOCK_TITLE=$'first\tsecond\nthird' "$CLI" --iteration 'Project\Sprint' > "$TMP/out"
+[ "$(wc -l < "$TMP/out" | tr -d ' ')" = 2 ]
+[ "$(sed -n '2p' "$TMP/out" | awk -F '\t' '{print NF}')" = 5 ]
 rm -f "$TMP/batches.jsonl"
 TEST_COUNT=0 "$CLI" --current --json > "$TMP/out"
 jq -e '.items == []' "$TMP/out" >/dev/null
