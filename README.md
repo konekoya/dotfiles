@@ -150,7 +150,7 @@ Repository-managed skills:
 | `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals, current checks, and the manual test checklist (unticked items block the merge unless the user waives them), then close out ClickUp (Azure DevOps) and worktrees |
 | `squash-git-commits` | Squash feature-branch commits into one relative to the selected PR or repository target branch |
 | `summarize-pr` | Summarize branch changes and update the Azure DevOps PR description, preserving the `create-pr` risk block |
-| `sync-work-notes` | Pull the private work notes, update decisions, reports, and memory from the current session, then commit on a branch and open a PR for review |
+| `end-work` | Pull the private work notes, record decisions and memory, maintain status and enabled reports per the notes guides, then commit on a notes branch and ask before publishing a PR; list automation candidates without writing them |
 
 To add a shared skill, create `~/dotfiles/skills/my-skill/SKILL.md` and run `./install.sh`. The installer creates all four per-skill links; no manual links are needed.
 
@@ -361,7 +361,11 @@ claude-memory   impress/memory    code/my-project
   claude-memory   impress/memory    code/my-project
   ```
 
-Existing targets are never replaced. To move an existing Claude memory directory into the notes, copy its files into the source directory, remove the original directory, and run `./install.sh` again. `doctor` fetches the notes and reports missing links, uncommitted notes, commits that are not pushed yet, and commits from another machine that are not pulled yet. The `sync-work-notes` skill pulls, updates the notes from the current session, commits on a notes branch, and opens a pull request; notes reach `main` only after you review and merge it. Run it at the end of a work session.
+Existing targets are never replaced. To move an existing Claude memory directory into the notes, copy its files into the source directory, remove the original directory, and run `./install.sh` again. `doctor` fetches the notes and reports missing links, uncommitted notes, commits that are not pushed yet, and commits from another machine that are not pulled yet.
+
+Run `end-work` at the end of a work session (including "end of day", "sync work notes", "下班", "更新 work notes", and "同步筆記"). It pulls before recording session decisions and memory, updates a board or status file when the notes README or project guide defines one, and updates weekly reports only when the project guide enables them. Disabled items are skipped. If the guide names a sprint or iteration, the report includes it; a missing place for it is added and reported to you. The skill also lists repeated work worth turning into a skill or command, with a suggested location in this repository or the private notes. This review writes nothing; you decide what to add and where.
+
+Publishing keeps the existing flow: scan for secrets before committing, make one commit on a notes branch, ask before one push, then open or update one pull request. The skill never merges or adds AI attribution; notes reach `main` only after you review and merge the PR. `end-work` replaces `sync-work-notes`: run `./install.sh` after updating to link the replacement and retire only installer-owned old links once the replacement is usable. Customized old files, directories, and links are preserved with a warning; a blocked replacement leaves the old link intact.
 
 Keep secrets out of the notes exactly as in this repository: tokens stay in `alias/.env`, and remote URLs with credentials are never written down. The notes repository's own README describes what belongs in it.
 
@@ -452,7 +456,7 @@ gh-auth pr list --repo OWNER/REPO
 gh-auth --check
 ```
 
-`--check` runs `gh auth status` and prints one status line (never raw `gh` output or a token), exiting `0` when authenticated, `10` when no credential exists, `11` when the configured one is invalid or expired (it is not silently replaced by the `gh` login), `12` when a sandbox or network restriction blocked the check (the credential was not tested; approve the command outside the sandbox instead of re-authenticating), and `13` when `gh` is not installed. Agent skills (`create-pr`, `merge-pr`, `sync-work-notes`, `orca-issue-workspace`) call `gh-auth` instead of bare `gh`.
+`--check` runs `gh auth status` and prints one status line (never raw `gh` output or a token), exiting `0` when authenticated, `10` when no credential exists, `11` when the configured one is invalid or expired (it is not silently replaced by the `gh` login), `12` when a sandbox or network restriction blocked the check (the credential was not tested; approve the command outside the sandbox instead of re-authenticating), and `13` when `gh` is not installed. Agent skills (`create-pr`, `merge-pr`, `end-work`, `orca-issue-workspace`) call `gh-auth` instead of bare `gh`.
 
 ### `ado-rest`
 

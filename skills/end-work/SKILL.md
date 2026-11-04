@@ -1,9 +1,9 @@
 ---
-name: sync-work-notes
-description: 'Sync the private work-notes repository: pull first, record what this session decided or finished (decisions, reports, agent memory) following the notes README, check for secrets, then commit on a notes branch, push it, and open a pull request for the user to review. Also pulls at the start of work. Use when: sync work notes, update work notes, end of day, 下班, 更新 work notes, 同步筆記.'
+name: end-work
+description: 'End a work session: pull the private work notes, record decisions and memory, maintain status and enabled reports as the notes guides define, check for secrets, then commit on a notes branch and ask before pushing and opening a pull request. List automation candidates without writing them. Use when: end work, end of day, sync work notes, update work notes, 下班, 更新 work notes, 同步筆記.'
 ---
 
-# Sync Work Notes
+# End Work
 
 The work notes are a private Git repository that `install.sh` clones and links (see the dotfiles README, "Work notes"). Notes reach `main` only through a pull request that the user reviews and merges. The user invoking this skill authorizes one commit, one push of a notes branch, and opening (or updating) one pull request; it never authorizes pushing to `main` or merging, and it does not authorize any other outward action.
 
@@ -17,7 +17,6 @@ NOTES_DIR="${WORK_NOTES_DIR:-$HOME/work-notes}"
 git -C "$NOTES_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || echo "missing"
 git -C "$NOTES_DIR" status --short
 BRANCH="$(git -C "$NOTES_DIR" branch --show-current)"
-BEFORE="$(git -C "$NOTES_DIR" rev-parse HEAD)"
 git -C "$NOTES_DIR" fetch --quiet origin >/dev/null 2>&1 || echo "fetch failed"
 if [ "$BRANCH" = "main" ]; then
   if git -C "$NOTES_DIR" pull --rebase --autostash --quiet >/dev/null 2>&1; then echo "pulled"; else echo "pull failed"; fi
@@ -30,15 +29,14 @@ fi
 
 - Missing: tell the user to set `WORK_NOTES_REPO` in `alias/.env` and run `install.sh`; stop.
 - Pull failed: show `git -C "$NOTES_DIR" status --short` and stop. Do not resolve conflicts in notes without asking, and never force-push.
-- Start-of-work request (only pulling): report `git -C "$NOTES_DIR" log --oneline "$BEFORE"..HEAD` when the pull brought commits (run it in the same shell as the pull), read the board or status file if the README defines one, then read the README's agent section, the current project's agent guide if the README defines one, and any routing or delegation guide they link (for example how to split work and choose agents and models), so the session follows them from the start. Then stop.
 
 ## 2. Update the notes
 
-Read `$NOTES_DIR/README.md` first; its rules and layout override anything here. Then record only facts from this session or from tools you checked in it:
+Read `$NOTES_DIR/README.md` first, then the current project's guide if the README defines one. Their rules and layout govern the updates below; skip any item they disable. Record only facts from this session or from tools you checked in it:
 
-- Handoff state, if the README defines a board or status file: rewrite it to the current unfinished work, who is on it, what it waits for, and next steps.
+- Handoff state, if the notes README or project guide defines a board or status file: update it with the current unfinished work, who is on it, what it waits for, and next steps.
 - Decisions agreed with other people or teams, with date and references (task IDs, PR numbers).
-- Progress for the current report period (merged or opened PRs, task status changes).
+- Weekly report, only when the project guide enables reports: update progress for the current report period (merged or opened PRs, task status changes). If the guide names a sprint or iteration, fill in its place in the report format; if that place is missing, add it and tell the owner. Do not invent a sprint or iteration.
 - Memory: if your tool keeps its memory inside the notes (for Claude Code, a symlinked project memory directory), it is already there; update or add entries per your memory rules for preferences, corrections, and reusable procedures learned this session. Other tools skip this.
 
 Keep entries short and in your own words: no raw logs, API responses, or pasted messages. Do not rewrite unrelated entries.
@@ -71,6 +69,10 @@ if git -C "$NOTES_DIR" push --quiet -u origin HEAD >/dev/null 2>&1; then echo "p
 
 `gh-auth pr create --fill` uses the commit messages; give it `--title`/`--body` when the branch has several commits. Do not merge the PR, approve it, or enable auto-merge; the user reviews and merges it. No AI attribution or co-author trailers. If nothing changed, say so and skip the commit. If the push fails, leave the commit in place and report it; `doctor` will show it as unpushed.
 
-## 5. Report
+## 5. List automation candidates (read-only)
+
+Review this session for repeated work that would suit a new skill or command. List each candidate in one line: what was repeated, why it is worth automating, and the suggested location (this repository or the private notes). Keep private details out of suggestions for this public repository. Write no candidate files, notes entries, skills, or commands; the owner decides what to add and where. If there are no candidates, say so. Include this review even when no notes changed.
+
+## 6. Report
 
 One short list: files changed with a phrase each, the branch and commit hash, whether the push succeeded, and the PR link.

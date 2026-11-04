@@ -322,6 +322,28 @@ status=$?
 [ "$status" -ne 0 ] || fail "core symlink failure returned status 0"
 grep -Fq '❌ FAIL: ~/.gitconfig is missing — run install.sh' "$TEST_CASE_DIR/output" || fail "missing Git config did not recommend installation"
 
+# doctor derives its expected skills from the renamed source, so it requires
+# end-work and never requires the retired sync-work-notes link after migration.
+setup_fixture end-work-renamed
+mkdir -p "$TEST_DOTFILES/skills/end-work" || fail "could not prepare end-work source"
+cp "$REPO_ROOT/skills/end-work/SKILL.md" "$TEST_DOTFILES/skills/end-work/" || fail "could not copy end-work"
+for tool_dir in "$TEST_HOME/.claude/skills" "$TEST_HOME/.copilot/skills" "$TEST_HOME/.agents/skills"; do
+  ln -s "$TEST_DOTFILES/skills/sync-work-notes" "$tool_dir/sync-work-notes" || fail "could not prepare old notes link"
+done
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+status=$?
+[ "$status" -ne 0 ] || fail "missing end-work links returned status 0"
+[ "$(grep -c 'links missing or incorrect (end-work)' "$TEST_CASE_DIR/output")" -eq 3 ] || fail "end-work was not required for every tool"
+for tool_dir in "$TEST_HOME/.claude/skills" "$TEST_HOME/.copilot/skills" "$TEST_HOME/.agents/skills"; do
+  rm "$tool_dir/sync-work-notes" || fail "could not remove migrated old notes link"
+  ln -s "$TEST_DOTFILES/skills/end-work" "$tool_dir/end-work" || fail "could not link end-work"
+done
+run_doctor > "$TEST_CASE_DIR/output" 2>&1
+status=$?
+[ "$status" -eq 0 ] || fail "migrated notes links returned status $status"
+[ "$(grep -c 'all 2 shared skill links are correct' "$TEST_CASE_DIR/output")" -eq 3 ] || fail "migrated notes links were not recognized for every tool"
+grep -Fq sync-work-notes "$TEST_CASE_DIR/output" && fail "doctor still expected the retired notes skill"
+
 # skill-creator is expected only outside Claude Code, where the plugin ships it.
 setup_fixture claude-plugin-skill
 mkdir -p "$TEST_DOTFILES/skills/skill-creator" || fail "could not prepare plugin skill"
