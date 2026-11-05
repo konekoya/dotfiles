@@ -128,4 +128,15 @@ done
 
 grep -Fq 'work in a separate git worktree on a new branch from `origin/main`' "$REPO_ROOT/skills/end-work/SKILL.md" || fail "end-work does not cover a shared notes checkout on a merged branch"
 
+CREATE_PR_SKILL="$REPO_ROOT/skills/create-pr/SKILL.md"
+grep -Fq '**Public text check.**' "$CREATE_PR_SKILL" || fail "create-pr has no public text check"
+grep -Fq 'skip this check silently' "$CREATE_PR_SKILL" || fail "create-pr public text check is not skipped without a guide list"
+grep -Fq 'quote the term only in the conversation' "$CREATE_PR_SKILL" || fail "create-pr may repeat a matched term in public text"
+
+MERGE_PR_SKILL="$REPO_ROOT/skills/merge-pr/SKILL.md"
+grep -Fq '**Branch checked out in the main checkout**' "$MERGE_PR_SKILL" || fail "merge-pr has no checked-out branch cleanup"
+grep -Fq 'equals the merged PR head' "$MERGE_PR_SKILL" || fail "merge-pr branch cleanup does not require the merged head"
+grep -Fq 'change nothing and report why' "$MERGE_PR_SKILL" || fail "merge-pr branch cleanup has no safe fallback"
+grep -Fq 'Never apply this to a branch checked out in another worktree' "$MERGE_PR_SKILL" || fail "merge-pr cleanup may touch another worktree"
+
 echo "start-work regression checks passed"

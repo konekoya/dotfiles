@@ -61,5 +61,6 @@ Squash-merge unless the repository requires another strategy. Pin the merge to t
 
 - **Linked task**: follow the reference (Azure DevOps updates an existing ClickUp task; GitHub skips ClickUp).
 - **Worktree and branches**: if the merged branch is checked out in a local worktree, remove the worktree only when its tree is clean and its `HEAD` equals the merged PR head. Use the managing tool's remove command when one exists (for example `orca worktree rm`); otherwise `git worktree remove`. Never force-remove. Delete the local branch only after its worktree is gone.
+- **Branch checked out in the main checkout**: if the merged branch is the current branch of the main checkout, its tree is clean, and local `HEAD` equals the merged PR head (`headRefOid` from the readiness query), switch the checkout to the target branch, run `git pull --ff-only`, then delete the local branch. A squash merge makes `git branch -d` refuse, so use `git branch -D` only after those checks hold; the merged PR head shows nothing is lost. If any check fails, change nothing and report why. Never apply this to a branch checked out in another worktree.
 
-Report each PR as merged (merge commit), skipped (reason), or blocked (failing requirement, including unticked checklist items), plus the checklist state or waiver, and the task and worktree outcomes.
+Report each PR as merged (merge commit), skipped (reason), or blocked (failing requirement, including unticked checklist items), plus the checklist state or waiver, and the task, worktree and branch outcomes.

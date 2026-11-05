@@ -122,6 +122,8 @@ Collect any missing target, title, description, draft preference, and reviewers 
 
 ### 6. Preview and publish
 
+**Public text check.** Applies only when the target repository is public (for GitHub, `gh-auth repo view "$GH_REPO" --json visibility --jq .visibility` prints `PUBLIC`) and the private work notes exist (see the dotfiles README, "Work notes"). Read the notes README and the current project's guide the way `start-work` does. If the guide lists terms or categories that must stay out of public text, check the drafted title and description, the commit subjects and bodies in `git log "$BASE_REF"..HEAD`, and the added lines of the diff against them. A match stops publishing: tell the user which field matched and quote the term only in the conversation, never in the repository, a commit, or a PR, then redraft. With no notes, no guide, or no such list, skip this check silently. It is read-only.
+
 Before publishing, check the title against the resolved project format and verify that any
 work-item prefix matches the intended primary linked item (not the PR number). For example,
 a repository requiring `[1234] Description` must not fall back to `fix: description` just

@@ -137,7 +137,7 @@ Repository-managed skills:
 |-------|---------|
 | `address-pr-review` | Fetch Copilot review comments from an Azure DevOps PR, discuss fixes, then apply approved fixes and reply to the threads |
 | `babysit-pr-checks` | Resolve conflicts and PR feedback, run checks, push, and monitor/fix CI until the Azure DevOps PR is green |
-| `create-pr` | Detect GitHub or Azure DevOps from the selected remote, run repository checks, push, and create or update a PR using `gh` or the shared Azure DevOps REST helper; optional ClickUp linking/status updates apply only to Azure DevOps; scores review risk (security, UI regression, data, API, and more) into a marked PR description block |
+| `create-pr` | Detect GitHub or Azure DevOps from the selected remote, run repository checks, push, and create or update a PR using `gh` or the shared Azure DevOps REST helper; optional ClickUp linking/status updates apply only to Azure DevOps; scores review risk (security, UI regression, data, API, and more) into a marked PR description block; for a public repository it checks the draft against the project guide's public-text rules before publishing |
 | `create-clickup-task` | Create a ClickUp task directly or from the current branch/PR with formatted lists and optional reviewer verification steps, choose its type and placement, and optionally link the PR without losing formatting |
 | `create-git-commit` | Draft a Conventional Commit message from the changes and commit after confirmation |
 | `fix-npm-audit` | Triage `npm audit` findings by severity, ask before applying fixes, then commit |
@@ -147,7 +147,7 @@ Repository-managed skills:
 | `orca-issue-workspace` | Dispatch tasks or GitHub issues to an engineer in an Orca worktree and lead review and delivery |
 | `research-prompt` | Write a read-only investigation prompt for an agent in another codebase and verify its findings |
 | `skill-creator` | Create, update, and evaluate shared agent skills (GitHub Copilot CLI and Codex only) |
-| `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals, current checks, and the manual test checklist (unticked items block the merge unless the user waives them), then close out ClickUp (Azure DevOps) and worktrees |
+| `merge-pr` | Squash-merge ready GitHub or Azure DevOps PRs in a safe order after verifying approvals, current checks, and the manual test checklist (unticked items block the merge unless the user waives them), then close out ClickUp (Azure DevOps), worktrees, and a merged branch left checked out in the main checkout (only when clean and equal to the merged PR head) |
 | `squash-git-commits` | Squash feature-branch commits into one relative to the selected PR or repository target branch |
 | `summarize-pr` | Summarize branch changes and update the Azure DevOps PR description, preserving the `create-pr` risk block |
 | `start-work` | Pull private work notes on `main`, read the board and project guides, then report board and tracker status without changing notes or tracker data |
