@@ -41,7 +41,11 @@ Read `$NOTES_DIR/README.md` first, then the current project's guide if the READM
 
 Keep entries short and in your own words: no raw logs, API responses, or pasted messages. Do not rewrite unrelated entries.
 
-## 3. Check before committing
+## 3. Check QA hand-offs (read-only)
+
+Apply this step only when the project guide defines a QA hand-off rule. If it defines none, skip the step silently and leave it out of the report. Otherwise, when syncing tasks, run only the read-only query the guide specifies for the rule and list the user's items that are already in the guide's waiting-for-QA state but still assigned to the user. Tell the user which ones (ID and title). Do not build the query yourself, and never reassign an item, change a state, or comment; the guide says who confirms the hand-off and when. If the query cannot run, say why and continue.
+
+## 4. Check before committing
 
 ```bash
 git -C "$NOTES_DIR" add -A
@@ -51,7 +55,7 @@ git -C "$NOTES_DIR" diff --cached -U0 | grep -nE '(ghp_|github_pat_|pk_[A-Za-z0-
 
 The last command prints only diff line numbers. If it prints anything, unstage (`git -C "$NOTES_DIR" reset -q`), tell the user which file looks sensitive without quoting it, and stop. Also confirm `links.local.tsv` is not staged; it is machine-specific.
 
-## 4. Commit on a branch, ask, push, open a PR
+## 5. Commit on a branch, ask, push, open a PR
 
 Never commit to `main`. If the current branch is `main`, create a branch first; uncommitted changes move with it:
 
@@ -69,10 +73,10 @@ if git -C "$NOTES_DIR" push --quiet -u origin HEAD >/dev/null 2>&1; then echo "p
 
 `gh-auth pr create --fill` uses the commit messages; give it `--title`/`--body` when the branch has several commits. Do not merge the PR, approve it, or enable auto-merge; the user reviews and merges it. No AI attribution or co-author trailers. If nothing changed, say so and skip the commit. If the push fails, leave the commit in place and report it; `doctor` will show it as unpushed.
 
-## 5. List automation candidates (read-only)
+## 6. List automation candidates (read-only)
 
 Review this session for repeated work that would suit a new skill or command. List each candidate in one line: what was repeated, why it is worth automating, and the suggested location (this repository or the private notes). Keep private details out of suggestions for this public repository. Write no candidate files, notes entries, skills, or commands; the owner decides what to add and where. If there are no candidates, say so. Include this review even when no notes changed.
 
-## 6. Report
+## 7. Report
 
-One short list: files changed with a phrase each, the branch and commit hash, whether the push succeeded, and the PR link.
+One short list: files changed with a phrase each, the branch and commit hash, whether the push succeeded, and the PR link. Add the QA hand-off items from step 3 only when the guide defines the rule.

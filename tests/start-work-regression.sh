@@ -112,4 +112,17 @@ grep -Fq 'ado-tasks` from inside the project repository' "$SKILL" || fail "Azure
 grep -Fq 'ado-rest context' "$SKILL" || fail "Azure DevOps profile preflight is not documented"
 grep -Fq 'Never run `clickup status`' "$SKILL" || fail "tracker write boundary is not documented"
 
+for skill_name in start-work end-work; do
+  QA_SKILL="$REPO_ROOT/skills/$skill_name/SKILL.md"
+  grep -Fq 'Check QA hand-offs (read-only)' "$QA_SKILL" || fail "$skill_name has no QA hand-off step"
+  grep -Fq 'only when the project guide defines a QA hand-off rule' "$QA_SKILL" || fail "$skill_name QA step is not driven by the project guide"
+  grep -Fq 'skip the step silently' "$QA_SKILL" || fail "$skill_name does not skip the QA step silently without a rule"
+  grep -Fq 'never reassign an item, change a state, or comment' "$QA_SKILL" || fail "$skill_name QA step does not forbid tracker writes"
+  grep -Fq 'Do not build the query yourself' "$QA_SKILL" || fail "$skill_name keeps the QA query out of the project guide"
+  # Tracker states and people belong to the project guide, not this public skill.
+  if grep -Fq 'QA Pending' "$QA_SKILL"; then
+    fail "$skill_name names a project-specific tracker state"
+  fi
+done
+
 echo "start-work regression checks passed"

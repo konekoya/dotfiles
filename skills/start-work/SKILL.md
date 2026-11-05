@@ -55,6 +55,10 @@ Use only the read commands and settings specified by the current project's guide
 
 If a task's status looks wrong, list the task and ask the user. Never run `clickup status`, update a ClickUp task, or change a work item.
 
-## 4. Report
+## 4. Check QA hand-offs (read-only)
 
-Summarize the board or status file, tracker findings (or why the query was skipped), and the iteration used with its source stated as "from the notes." If no iteration was defined, say so and skip the Azure DevOps query. For ClickUp snapshots, state the date used and whether it came from the guide/board or the seven-day fallback. Include the notes pull result and the commit summaries it brought, or the non-main branch's missing `origin/main` count. Do not include the notes remote URL. Make no notes, tracker, or Git changes beyond the authorized pull on `main`.
+Apply this step only when the project guide defines a QA hand-off rule. If it defines none, skip the step silently and leave it out of the report. Otherwise, when syncing tasks, run only the read-only query the guide specifies for the rule and list the user's items that are already in the guide's waiting-for-QA state but still assigned to the user. Tell the user which ones (ID and title). Do not build the query yourself, and never reassign an item, change a state, or comment; the guide says who confirms the hand-off and when. If the query cannot run, say why and continue.
+
+## 5. Report
+
+Summarize the board or status file, tracker findings (or why the query was skipped), the QA hand-off items from step 4 when the guide defines the rule, and the iteration used with its source stated as "from the notes." If no iteration was defined, say so and skip the Azure DevOps query. For ClickUp snapshots, state the date used and whether it came from the guide/board or the seven-day fallback. Include the notes pull result and the commit summaries it brought, or the non-main branch's missing `origin/main` count. Do not include the notes remote URL. Make no notes, tracker, or Git changes beyond the authorized pull on `main`.
