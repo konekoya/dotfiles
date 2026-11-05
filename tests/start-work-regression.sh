@@ -117,6 +117,7 @@ for skill_name in start-work end-work; do
   grep -Fq 'Check QA hand-offs (read-only)' "$QA_SKILL" || fail "$skill_name has no QA hand-off step"
   grep -Fq 'only when the project guide defines a QA hand-off rule' "$QA_SKILL" || fail "$skill_name QA step is not driven by the project guide"
   grep -Fq 'skip the step silently' "$QA_SKILL" || fail "$skill_name does not skip the QA step silently without a rule"
+  grep -Fq 'on every run of this skill' "$QA_SKILL" || fail "$skill_name does not say when the QA step runs"
   grep -Fq 'never reassign an item, change a state, or comment' "$QA_SKILL" || fail "$skill_name QA step does not forbid tracker writes"
   grep -Fq 'Do not build the query yourself' "$QA_SKILL" || fail "$skill_name keeps the QA query out of the project guide"
   # Tracker states and people belong to the project guide, not this public skill.
@@ -124,5 +125,7 @@ for skill_name in start-work end-work; do
     fail "$skill_name names a project-specific tracker state"
   fi
 done
+
+grep -Fq 'work in a separate git worktree on a new branch from `origin/main`' "$REPO_ROOT/skills/end-work/SKILL.md" || fail "end-work does not cover a shared notes checkout on a merged branch"
 
 echo "start-work regression checks passed"
