@@ -57,7 +57,7 @@ If a task's status looks wrong, list the task and ask the user. Never run `click
 
 ## 4. Check QA hand-offs (read-only)
 
-Apply this step only when the project guide defines a QA hand-off rule. If it defines none, skip the step silently and leave it out of the report. Otherwise, when syncing tasks, run only the read-only query the guide specifies for the rule and list the user's items that are already in the guide's waiting-for-QA state but still assigned to the user. Tell the user which ones (ID and title). Do not build the query yourself, and never reassign an item, change a state, or comment; the guide says who confirms the hand-off and when. If the query cannot run, say why and continue.
+Apply this step only when the project guide defines a QA hand-off rule. If it defines none, skip the step silently and leave it out of the report. Otherwise, run this step on every run of this skill: run only the read-only query the guide specifies for the rule and list the user's items that are already in the guide's waiting-for-QA state but still assigned to the user. Tell the user which ones (ID and title). Do not build the query yourself, and never reassign an item, change a state, or comment; the guide says who confirms the hand-off and when. If the query cannot run, say why and continue.
 
 ## 5. Report
 

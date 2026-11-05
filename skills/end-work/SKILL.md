@@ -25,7 +25,7 @@ else
 fi
 ```
 
-- On a notes branch: keep working on it (its PR is still open or not yet created). If `origin/main` has commits the branch lacks, tell the user and ask before rebasing; check with `gh-auth pr list --head "$BRANCH" --state all` whether its PR was already merged, and if so ask whether to start a fresh branch from `origin/main`.
+- On a notes branch: keep working on it (its PR is still open or not yet created). If `origin/main` has commits the branch lacks, tell the user and ask before rebasing; check with `gh-auth pr list --head "$BRANCH" --state all` whether its PR was already merged, and if so ask whether to start a fresh branch from `origin/main`. Other sessions may share this checkout, so never switch it, reset it, or delete its branch to do that; when it sits on a merged or stale branch, work in a separate git worktree on a new branch from `origin/main` and tell the user.
 
 - Missing: tell the user to set `WORK_NOTES_REPO` in `alias/.env` and run `install.sh`; stop.
 - Pull failed: show `git -C "$NOTES_DIR" status --short` and stop. Do not resolve conflicts in notes without asking, and never force-push.
@@ -43,7 +43,7 @@ Keep entries short and in your own words: no raw logs, API responses, or pasted 
 
 ## 3. Check QA hand-offs (read-only)
 
-Apply this step only when the project guide defines a QA hand-off rule. If it defines none, skip the step silently and leave it out of the report. Otherwise, when syncing tasks, run only the read-only query the guide specifies for the rule and list the user's items that are already in the guide's waiting-for-QA state but still assigned to the user. Tell the user which ones (ID and title). Do not build the query yourself, and never reassign an item, change a state, or comment; the guide says who confirms the hand-off and when. If the query cannot run, say why and continue.
+Apply this step only when the project guide defines a QA hand-off rule. If it defines none, skip the step silently and leave it out of the report. Otherwise, run this step on every run of this skill: run only the read-only query the guide specifies for the rule and list the user's items that are already in the guide's waiting-for-QA state but still assigned to the user. Tell the user which ones (ID and title). Do not build the query yourself, and never reassign an item, change a state, or comment; the guide says who confirms the hand-off and when. If the query cannot run, say why and continue.
 
 ## 4. Check before committing
 
