@@ -560,12 +560,18 @@ pr status [ID] --watch     # re-check every 20s while builds are pending
 pr status [ID] --interval 10
 pr status [ID] --json      # one read-only JSON snapshot
 pr comments [ID]           # current branch's PR, or a specific PR
+pr comment ID ./comment.txt # post a top-level thread (or use - for stdin)
 pr merge [ID]              # read-only preview: is the PR ready to squash-merge?
 pr merge [ID] --json       # the same verdict as one JSON object
 pr merge ID --execute --head SHA   # squash-merge, pinned to the previewed head
 pr merge ID --requeue-expired      # requeue expired build evaluations, then preview
 pr open                    # open PR in Chrome, or the repository page
 ```
+
+`pr comment ID <file|->` requires `iconv` and posts one top-level Azure DevOps
+thread from nonempty UTF-8 text, printing its created thread ID. Posting is a tracker write requiring explicit
+user authorization. If its outcome is uncertain, inspect the PR before retrying.
+GitHub does not support this command.
 
 Every subcommand supports `--help`. `pr status --json` cannot be combined with
 `--watch`. Its stable JSON object has these keys:
