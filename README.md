@@ -645,6 +645,7 @@ Read and update ClickUp tasks and Docs without interactive prompts. Requires `jq
 
 ```sh
 clickup task example123 --json
+clickup assign example123 --me
 clickup status example123 "In Progress"
 clickup comment example123 ./comment.txt
 clickup comments example123 --json --limit 50
@@ -665,7 +666,14 @@ They list a Doc's page tree, create Markdown pages or subpages,
 and replace page content; use `-` to read content from stdin. Page creation
 prints the new ID and a reminder to add attachments in the ClickUp UI.
 
-Task IDs can also be full task URLs. Read task comments with `clickup comments`:
+Task IDs can also be full task URLs. Task JSON preserves its existing fields and
+adds `assignees`, an array of `{id, username}` objects; IDs are normalized to
+decimal strings. `clickup assign <id|url> --me` adds the authenticated user while
+preserving existing assignees. It skips the write when already assigned and
+prints `Assigned: <task-id>` or `Already assigned: <task-id>`. This is a write:
+run it only with explicit authorization for the assignment. It never removes
+assignees or retries automatically; if the result cannot be confirmed, check the
+task before retrying. Read task comments with `clickup comments`:
 it shows the latest 25 by default, or up to a positive `--limit` (maximum 999999),
 newest first. `--json` returns an array of objects with string `id`, `author`,
 `date` (Unix milliseconds), and `text`; human output shows those fields as blocks.
