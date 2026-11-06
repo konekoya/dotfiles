@@ -79,4 +79,22 @@ wf '[.jobs[].steps[]?.run // empty] | join("\n") as $run
   || fail "syntax, whitespace, ShellCheck and regression-suite steps must all remain"
 check_pass "syntax, whitespace, ShellCheck and all regression suites still run"
 
+# Keep local coverage aligned with explicit CI commands, without parsing shell syntax.
+# These deliberate text assertions cover commands/file sets, not arbitrary shell semantics.
+RUNNER="$REPO_ROOT/scripts/check-all"
+[ -f "$RUNNER" ] || fail "missing check-all runner"
+for needle in 'install.sh scripts/* lib/*.sh tests/*.sh' \
+  'alias/.alias alias/.git_alias alias/.util_alias zsh/.zshrc.shared' \
+  '/bin/bash -n' 'zsh -n' 'git diff --check' \
+  'shellcheck -S warning -x install.sh scripts/* lib/*.sh tests/*.sh' \
+  'for file in tests/*.sh' '/bin/bash "$file"'; do
+  grep -Fq -- "$needle" "$RUNNER" || fail "check-all coverage missing: $needle"
+  jq -e --arg needle "$needle" \
+    '[.jobs.shell.steps[]?.run // empty] | join("\n") | contains($needle)' \
+    <<< "$WORKFLOW_JSON" > /dev/null || fail "CI coverage missing: $needle"
+done
+# Local checks must cover both index and working tree; CI checks committed ranges.
+grep -Fq 'git diff --cached --check' "$RUNNER" || fail "check-all must check staged whitespace"
+check_pass "check-all and CI cover matching commands and file sets"
+
 echo "CI workflow regression checks passed"

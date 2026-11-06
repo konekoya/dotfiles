@@ -412,6 +412,18 @@ base branch first when you need the latest upstream changes.
 
 All scripts are in `scripts/` and available on `$PATH` after installation.
 
+### `check-all`
+
+Run `check-all` (or `./scripts/check-all` before installation) from any directory
+for Bash/Zsh syntax, unstaged and staged whitespace, ShellCheck, and every
+`tests/*.sh` suite through macOS `/bin/bash`. Every step reports PASS/FAIL;
+failures do not stop later checks, and any failure produces a nonzero exit.
+Output is quiet by default; `check-all --verbose` shows captured diagnostics.
+Capture files are private and removed on exit. The runner does not load `alias/.env`.
+Requires Git, Zsh, ShellCheck, and the regression dependencies listed under
+[Verification](#verification); missing tools fail affected steps without installation.
+Local whitespace checks cover the working tree and index; CI checks committed ranges.
+
 ### `doctor`
 
 Checks symlinks (including the starship config), shared skills, shell config, PATH, optional dependencies, Oh My Zsh plugin files, and the optional work notes (links from `links.tsv` and `links.local.tsv`, uncommitted changes, and unpushed commits; it fetches the notes the same way as the repository below and warns when another machine pushed changes you have not pulled).
@@ -915,7 +927,7 @@ See [agent tooling](agents/tooling.md) for discovery and integration guidance.
 | `az` | Azure DevOps profiles configured with `auth = azure-cli` | `brew install --cask azure-cli` |
 | `gh` | `gh-auth` and the GitHub skills; optional GitHub auth for `pr open` | `brew install gh` |
 | `starship` | shared prompt (`zsh/starship.toml`); needs a Nerd Font, falls back to the oh-my-zsh theme without it | `brew install starship` |
-| `shellcheck` | lint of `install.sh`, `scripts/*`, `lib/*.sh`, and `tests/*.sh` in CI and before committing shell changes (see `AGENTS.md`) | `brew install shellcheck` |
+| `shellcheck` | `check-all`; lint of `install.sh`, `scripts/*`, `lib/*.sh`, and `tests/*.sh` in CI and before committing shell changes (see `AGENTS.md`) | `brew install shellcheck` |
 | `magick` | `image-shrink`; includes `libheif` for HEIC/HEIF input and output | `brew install imagemagick` |
 | Nerd Font | starship prompt icons; without one (or without selecting it in the terminal profile) icons render as boxes | `brew install --cask font-hack-nerd-font`, then pick **Hack Nerd Font** in the terminal's font setting |
 | `python3` | `server` alias; regression test suites | `brew install python` |
@@ -1086,13 +1098,16 @@ to restrict the file to its owner.
 
 ## Verification
 
-Run syntax, ShellCheck, whitespace, and regression checks locally:
+Run `./scripts/check-all` for all local checks, or add `--verbose` to see check
+output. It continues after failures and includes staged whitespace. The equivalent
+individual commands are:
 
 ```sh
 for file in install.sh scripts/* lib/*.sh tests/*.sh; do /bin/bash -n "$file" || exit 1; done
 for file in alias/.alias alias/.git_alias alias/.util_alias zsh/.zshrc.shared; do zsh -n "$file" || exit 1; done
 shellcheck -S warning -x install.sh scripts/* lib/*.sh tests/*.sh
 git diff --check
+git diff --cached --check
 for file in tests/*.sh; do /bin/bash "$file" || exit 1; done
 ```
 

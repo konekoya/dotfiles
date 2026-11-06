@@ -3,6 +3,7 @@
 Nothing here asks you to run a command, load a secret, or call an API when a session starts. Act only when the user's task needs it.
 
 - Discovery: if `command -v cmds` succeeds, `cmds --list` or `cmds --json` lists the local commands (read-only) and `<command> --help` describes one where supported. Discovery lists capabilities; it does not authorize running them or writing anything.
+- Dotfiles repository checks: run `./scripts/check-all` from the dotfiles checkout/worktree being verified for syntax, staged/unstaged whitespace, ShellCheck, and all regression suites. The installed `check-all` targets the checkout containing the command. It continues after failures; use `--verbose` to show check output.
 - The dotfiles repository is the parent of the directory that holds `cmds`. Read its `README.md` and only the on-demand guide the task needs: `agents/integrations/clickup.md`, `azure-devops.md`, `github.md` or `git.md`.
 - ClickUp: for a task URL or ID, read it with `clickup task <id|url> --json`. `clickup status` and `clickup comment` write and need the user's authorization.
 - Azure DevOps: use `ado-rest` (`ado-rest context` shows the parsed repository profile) instead of `az repos` or hand-built authenticated requests. GitHub: use `gh-auth`, not bare `gh`.
