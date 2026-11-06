@@ -13,6 +13,7 @@ usage() {
 Usage: clickup task <id|url> [--json]
        clickup status <id|url> <status>
        clickup comment <id|url> <file|->
+       clickup comments <id|url> [--json] [--limit N]
        clickup open [--list <id>]... [--assignee me]
        clickup snapshot --since <YYYY-MM-DD> [--list <id>]...
        clickup doc pages <doc-id>
@@ -33,7 +34,7 @@ task_id() {
 }
 [ "$#" -gt 0 ] || fail_usage
 command="$1"; shift
-case "$command" in --help|-h) [ "$#" -eq 0 ] || fail_usage; usage; exit 0 ;; task|status|comment|open|snapshot|doc) ;; *) fail_usage ;; esac
+case "$command" in --help|-h) [ "$#" -eq 0 ] || fail_usage; usage; exit 0 ;; task|status|comment|comments|open|snapshot|doc) ;; *) fail_usage ;; esac
 id=''; json=false; since=''; assignee=''; lists=()
 case "$command" in
   doc)
@@ -68,6 +69,20 @@ case "$command" in
       valid_id "$CLICKUP_WORKSPACE_ID" || { echo 'Set a valid CLICKUP_WORKSPACE_ID.' >&2; exit 1; }
     fi ;;
   task) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail_usage; id="$(task_id "$1")" || fail_usage; shift; if [ "$#" -gt 0 ]; then [ "$1" = --json ] || fail_usage; json=true; fi ;;
+  comments)
+    [ "$#" -ge 1 ] || fail_usage
+    id="$(task_id "$1")" || fail_usage; shift
+    limit=25; limit_set=false
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --json) [ "$json" = false ] || fail_usage; json=true; shift ;;
+        --limit)
+          [ "$limit_set" = false ] && [ "$#" -ge 2 ] || fail_usage
+          [[ "$2" =~ ^[1-9][0-9]{0,5}$ ]] || fail_usage
+          limit="$2"; limit_set=true; shift 2 ;;
+        *) fail_usage ;;
+      esac
+    done ;;
   status|comment) [ "$#" -eq 2 ] || fail_usage; id="$(task_id "$1")" || fail_usage; value="$2" ;;
   open|snapshot)
     while [ "$#" -gt 0 ]; do
@@ -142,7 +157,20 @@ case "$command" in
   comment)
     if [ "$value" = - ]; then comment="$(cat; printf '.')"; else [ -f "$value" ] && [ -r "$value" ] || fail_usage; comment="$(cat "$value"; printf '.')" || fail_usage; fi
     comment="${comment%.}"
-    clickup_comment "$id" "$comment" || api_error ;;
+    if ! posted="$(clickup_comment "$id" "$comment")"; then
+      echo 'Comment may have been posted; check comments before retrying.' >&2
+      api_error
+    fi
+    if ! comment_id="$(printf '%s' "$posted" | jq -er '.id | select((type == "string" or type == "number") and (tostring | test("^[A-Za-z0-9_-]+$"))) | tostring' 2>/dev/null)"; then
+      echo 'Comment may have been posted; check comments before retrying.' >&2
+      api_error
+    fi
+    printf 'Comment posted: %s\n' "$comment_id" ;;
+  comments)
+    comments="$(clickup_comments "$id" "$limit")" || api_error
+    if "$json"; then printf '%s\n' "$comments" | jq .; else
+      printf '%s\n' "$comments" | jq -r '.[] | "id: \(.id)\nauthor: \(.author)\ndate: \(.date)\n\(.text)\n"'
+    fi ;;
   open|snapshot)
     user_id=''; if [ "$assignee" = me ]; then user_id="$(clickup_user)" || api_error; fi
     for list in "${lists[@]}"; do
