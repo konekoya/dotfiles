@@ -486,7 +486,27 @@ ado-rest GET '/_apis/git/repositories/<repository>/pullrequests?api-version=7.1'
 
 Use only Azure DevOps API paths under `/_apis/`. `POST`, `PATCH`, and `PUT`
 require an explicit JSON body; `DELETE` may omit it. The command validates the
-fetch/push remote pair and profile before sending a request.
+fetch/push remote pair and profile before sending a request. `ado-rest --help`
+(or `POST --help`) prints the usage with a write example, and every body error
+repeats it.
+
+Write calls take the JSON body as the third argument, `-` to read it from stdin,
+or `@FILE` to read it from a file (like `curl -d`). Build the JSON with `jq -n` so
+quotes and newlines in text are escaped. Writes need the user's authorization.
+This adds a comment to a pull request thread:
+
+```sh
+body="$(jq -n --arg text 'Thanks, fixed.' '{content: $text, commentType: "text"}')"
+ado-rest POST '/_apis/git/repositories/<repository>/pullrequests/<id>/threads/<thread>/comments?api-version=7.1' "$body"
+
+# The same body from stdin or a file:
+jq -n --arg text 'Thanks, fixed.' '{content: $text, commentType: "text"}' |
+  ado-rest POST '/_apis/git/repositories/<repository>/pullrequests/<id>/threads/<thread>/comments?api-version=7.1' -
+ado-rest POST '/_apis/git/repositories/<repository>/pullrequests/<id>/threads/<thread>/comments?api-version=7.1' @body.json
+```
+
+Do not pipe the output through `jq` with `2>&1`: the error text is not JSON and hides
+the real message. Keep stderr separate when filtering a response.
 
 ### `ado-tasks`
 

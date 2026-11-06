@@ -74,6 +74,16 @@ assert_equal() {
   [ "$actual" = "$expected" ] || fail "$label: expected '$expected', got '$actual'"
 }
 
+assert_contains() {
+  local output="$1"
+  local expected="$2"
+  local label="$3"
+  case "$output" in
+    *"$expected"*) ;;
+    *) fail "$label: expected output to contain '$expected'" ;;
+  esac
+}
+
 assert_no_secret() {
   local output="$1"
   local secret="$2"
@@ -592,6 +602,63 @@ export ADO_TEST_CURL_MODE=empty-success
 PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" DELETE '/_apis/git/repositories/script-repo/pullrequests/123?api-version=7.1' > /dev/null || fail "ado-rest rejected a successful empty response"
 assert_equal DELETE "$(cat "$SCRIPT_METHOD_FILE")" "ado-rest DELETE method"
 unset ADO_TEST_CURL_MODE
+
+# ado-rest takes a write body as an argument, from stdin with '-', or from a file with '@path',
+# prints usage with a write example for help, and explains every body error.
+ADO_REST="$FIXTURE_DOTFILES/scripts/ado-rest"
+ADO_REST_PATH='/_apis/git/repositories/script-repo/pullrequests/123/threads/4/comments?api-version=7.1'
+ADO_REST_BODY='{"content":"Synthetic","commentType":"text"}'
+export ADO_TEST_CURL_BODY_FILE="$TEST_ROOT/ado-rest-posted-body"
+: > "$ADO_TEST_CURL_BODY_FILE"
+printf '%s' "$ADO_REST_BODY" | PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$ADO_REST" POST "$ADO_REST_PATH" - > /dev/null || fail "ado-rest POST body from stdin failed"
+assert_equal "$ADO_REST_BODY" "$(cat "$ADO_TEST_CURL_BODY_FILE")" "ado-rest stdin body"
+: > "$ADO_TEST_CURL_BODY_FILE"
+printf '%s\n' "$ADO_REST_BODY" > "$TEST_ROOT/ado-rest-body.json"
+PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$ADO_REST" POST "$ADO_REST_PATH" "@$TEST_ROOT/ado-rest-body.json" > /dev/null || fail "ado-rest POST body from file failed"
+assert_equal "$ADO_REST_BODY" "$(cat "$ADO_TEST_CURL_BODY_FILE")" "ado-rest file body"
+: > "$ADO_TEST_CURL_BODY_FILE"
+PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$ADO_REST" POST "$ADO_REST_PATH" "$ADO_REST_BODY" > /dev/null || fail "ado-rest POST body argument failed"
+assert_equal "$ADO_REST_BODY" "$(cat "$ADO_TEST_CURL_BODY_FILE")" "ado-rest argument body"
+: > "$ADO_TEST_CURL_BODY_FILE"
+printf '%s' "$ADO_REST_BODY" | PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$ADO_REST" DELETE "$ADO_REST_PATH" @- > /dev/null || fail "ado-rest DELETE body from stdin failed"
+assert_equal "$ADO_REST_BODY" "$(cat "$ADO_TEST_CURL_BODY_FILE")" "ado-rest DELETE stdin body"
+unset ADO_TEST_CURL_BODY_FILE
+
+# Help is not taken as a path or body: it exits 0 with usage and a write example on stdout.
+for help_args in "--help" "-h" "POST --help" "post -h" "POST /_apis/test --help" "context --help"; do
+  # shellcheck disable=SC2086 # help_args is a deliberate word list
+  help_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$ADO_REST" $help_args 2> "$TEST_ROOT/ado-rest-help.stderr")" || fail "ado-rest $help_args did not exit 0"
+  assert_contains "$help_output" "Usage: ado-rest" "ado-rest $help_args usage"
+  assert_contains "$help_output" "jq -n" "ado-rest $help_args write example"
+  [ ! -s "$TEST_ROOT/ado-rest-help.stderr" ] || fail "ado-rest $help_args wrote to stderr"
+done
+
+# Every body error names the problem, then prints usage and the write example, and exits 2.
+assert_ado_rest_body_error() {
+  local expected="$1" label="$2"
+  shift 2
+  local output status=0
+  output="$("$@" 2>&1 < "${ADO_REST_STDIN:-/dev/null}")" || status=$?
+  [ "$status" -eq 2 ] || fail "$label exited $status instead of 2"
+  assert_contains "$output" "$expected" "$label message"
+  assert_contains "$output" "Usage: ado-rest" "$label usage"
+  assert_contains "$output" "jq -n" "$label write example"
+}
+ADO_REST_RUN=(env "PATH=$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$ADO_REST")
+assert_ado_rest_body_error "POST requests require a JSON body" "ado-rest missing body" "${ADO_REST_RUN[@]}" POST "$ADO_REST_PATH"
+assert_ado_rest_body_error "POST request body must be valid JSON" "ado-rest invalid body" "${ADO_REST_RUN[@]}" POST "$ADO_REST_PATH" 'not-json'
+assert_ado_rest_body_error "DELETE request body must be valid JSON" "ado-rest invalid DELETE body" "${ADO_REST_RUN[@]}" DELETE "$ADO_REST_PATH" 'not-json'
+assert_ado_rest_body_error "GET requests do not accept a body" "ado-rest GET body" "${ADO_REST_RUN[@]}" GET "$ADO_REST_PATH" '{}'
+assert_ado_rest_body_error "body file is missing or unreadable" "ado-rest missing body file" "${ADO_REST_RUN[@]}" POST "$ADO_REST_PATH" "@$TEST_ROOT/ado-rest-absent.json"
+printf 'not-json' > "$TEST_ROOT/ado-rest-bad.json"
+assert_ado_rest_body_error "valid JSON (read from file)" "ado-rest invalid body file" "${ADO_REST_RUN[@]}" POST "$ADO_REST_PATH" "@$TEST_ROOT/ado-rest-bad.json"
+ADO_REST_STDIN="$TEST_ROOT/ado-rest-bad.json"
+assert_ado_rest_body_error "valid JSON (read from stdin)" "ado-rest invalid stdin body" "${ADO_REST_RUN[@]}" POST "$ADO_REST_PATH" -
+unset ADO_REST_STDIN
+: > "$TEST_ROOT/ado-rest-empty"
+ADO_REST_STDIN="$TEST_ROOT/ado-rest-empty"
+assert_ado_rest_body_error "valid JSON (read from stdin)" "ado-rest empty stdin body" "${ADO_REST_RUN[@]}" POST "$ADO_REST_PATH" -
+unset ADO_REST_STDIN
 
 script_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$PR_COMMENTS" 123 2>&1)"
 script_status=$?
