@@ -14,7 +14,37 @@ clickup_request() {
 
 clickup_task() { clickup_request "https://api.clickup.com/api/v2/task/$1"; }
 clickup_list() { clickup_request "https://api.clickup.com/api/v2/list/$1"; }
-clickup_user() { clickup_request 'https://api.clickup.com/api/v2/user' | jq -er '.user.id | select(. != null) | tostring'; }
+clickup_normalize_user_id() {
+  jq -er '
+    def id_string:
+      if type == "number" and . >= 0 and floor == . and . <= 2147483647 then tostring
+      elif type == "string" and test("^[0-9]{1,10}$") then
+        (sub("^0+"; "") | if . == "" then "0" else . end) as $id |
+        if ($id | length) < 10 or ($id | tonumber) <= 2147483647 then $id else error("invalid user id") end
+      else error("invalid user id") end;
+    id_string' 2>/dev/null
+}
+clickup_task_assignees() {
+  printf '%s' "$1" | jq -ce '
+    def id_string:
+      if type == "number" and . >= 0 and floor == . and . <= 2147483647 then tostring
+      elif type == "string" and test("^[0-9]{1,10}$") then
+        (sub("^0+"; "") | if . == "" then "0" else . end) as $id |
+        if ($id | length) < 10 or ($id | tonumber) <= 2147483647 then $id else error("invalid user id") end
+      else error("invalid user id") end;
+    if type != "object" or (.assignees | type) != "array" then error("invalid assignees")
+    else [.assignees[] | if type != "object" then error("invalid assignee") else
+      (.id | id_string) as $id |
+      if (.username | type) != "string" or (.username | length) == 0 then error("invalid username")
+      else {id:$id, username:.username} end
+    end] end' 2>/dev/null
+}
+clickup_user() {
+  local response user_id
+  response="$(clickup_request 'https://api.clickup.com/api/v2/user')" || return 1
+  user_id="$(printf '%s' "$response" | jq -c '.user.id // null' 2>/dev/null)" || return 1
+  clickup_normalize_user_id <<< "$user_id"
+}
 clickup_resolve_status() {
   printf '%s' "$1" | jq -c --arg name "$2" '[.statuses[] | select(.status | ascii_downcase == ($name | ascii_downcase)) | .status]'
 }
@@ -22,6 +52,11 @@ clickup_update_status() {
   local body
   body="$(jq -n --arg status "$2" '{status:$status}')" || return 1
   clickup_request -X PUT -H 'Content-Type: application/json' -d "$body" "https://api.clickup.com/api/v2/task/$1" >/dev/null
+}
+clickup_update_assignees() {
+  local body
+  body="$(jq -n --argjson user_id "$2" '{assignees:{add:[$user_id],rem:[]}}')" || return 1
+  clickup_request -X PUT -H 'Content-Type: application/json' -d "$body" "https://api.clickup.com/api/v2/task/$1"
 }
 clickup_comment() {
   local body

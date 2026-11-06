@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+unset CLICKUP_API_TOKEN
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -40,6 +41,17 @@ if [ "$method" != GET ]; then
     esac
   elif [ "$method" = POST ]; then printf '{"id":"new-page"}\n201'
   elif [ "$method" = PUT ] && [[ "$url" == */api/v3/* ]]; then printf '\n200'
+  elif [ "$method" = PUT ] && [[ "$url" == */api/v2/task/* ]]; then
+    case "${MOCK_ASSIGN_PUT:-ok}" in
+      ok) printf '{"assignees":[{"id":7,"username":"Self"}]}\n200' ;;
+      preserved) printf '{"assignees":[{"id":8,"username":"Other"},{"id":"7","username":"Self"}]}\n200' ;;
+      missing_self) printf '{"assignees":[{"id":8,"username":"Other"}]}\n200' ;;
+      dropped_other) printf '{"assignees":[{"id":7,"username":"Self"}]}\n200' ;;
+      malformed) printf '{"assignees":[{"id":"bad","username":"Self"}]}\n200' ;;
+      no_assignees) printf '{"id":"abc"}\n200' ;;
+      fail401) printf '{"err":"synthetic"}\n401' ;;
+      fail500) printf '{"err":"synthetic"}\n500' ;;
+    esac
   else printf '{}\n200'; fi
   exit
 fi
@@ -66,11 +78,30 @@ case "$url" in
     esac ;;
   *'/docs/doc-1/page_listing?max_page_depth=-1') printf '[{"id":"p1","name":"Root","pages":[{"id":"p2","name":"Child"}]}]\n200' ;;
   */task/fail) printf '{}\n404' ;;
-  */task/abc) printf '{"id":"abc","name":"Sample\001 task","status":{"status":"Open"},"list":{"id":"123","name":"Example"},"url":"https://example.invalid/t/abc"}\n200' ;;
+  */task/abc)
+    case "${MOCK_TASK:-default}" in
+      default) assignees='[{"id":7,"username":"Sample"}]' ;;
+      empty) assignees='[]' ;;
+      self_numeric) assignees='[{"id":7,"username":"Self"}]' ;;
+      self_string) assignees='[{"id":"0007","username":"Self"}]' ;;
+      other) assignees='[{"id":8,"username":"Other"}]' ;;
+      invalid_id) assignees='[{"id":"bad","username":"Bad"}]' ;;
+      invalid_large) assignees='[{"id":"2147483648","username":"Large"}]' ;;
+      invalid_user) assignees='[{"id":7,"username":null}]' ;;
+      missing_assignees) printf '{"id":"abc","name":"Sample","status":{"status":"Open"},"list":{"id":"123","name":"Example"},"url":"https://example.invalid/t/abc"}\n200'; exit ;;
+    esac
+    printf '{"id":"abc","name":"Sample\001 task","status":{"status":"Open"},"list":{"id":"123","name":"Example"},"url":"https://example.invalid/t/abc","assignees":%s}\n200' "$assignees" ;;
   */list/123) printf '{"name":"Example","statuses":[{"status":"Open","type":"open"},{"status":"Done","type":"closed"},{"status":"Review","type":"custom"},{"status":"review","type":"custom"}]}\n200' ;;
   *'page=0'*) printf '{"tasks":[{"id":"a","name":"First","status":{"status":"Open"},"assignees":[{"id":7,"username":"Sample"}],"date_updated":"1767225600000"}],"last_page":false}\n200' ;;
   *'page=1'*) printf '{"tasks":[{"id":"b","name":"Second","status":{"status":"Done"},"assignees":[],"date_updated":"1767225600000"}],"last_page":true}\n200' ;;
-  */user) printf '{"user":{"id":7}}\n200' ;;
+  */user)
+    case "${MOCK_USER:-valid}" in
+      valid) printf '{"user":{"id":7}}\n200' ;;
+      string) printf '{"user":{"id":"0007"}}\n200' ;;
+      invalid) printf '{"user":{"id":"seven"}}\n200' ;;
+      missing) printf '{"user":{}}\n200' ;;
+      denied) printf '{"err":"synthetic"}\n403' ;;
+    esac ;;
   *) printf '{}\n404' ;;
 esac
 MOCK
@@ -82,12 +113,65 @@ printf '%s\n' 'CLICKUP_API_TOKEN=synthetic_test_credential' > "$TMP/repo/alias/.
 CLI="$TMP/repo/scripts/clickup"
 "$CLI" task 'https://example.invalid/t/abc?view=1' --json > "$TMP/out"
 jq -e '.title == "Sample task" and .id == "abc"' "$TMP/out" >/dev/null
+jq -e '.assignees == [{id:"7",username:"Sample"}] and .status == "Open" and .list == "Example" and .url == "https://example.invalid/t/abc"' "$TMP/out" >/dev/null
+if ! MOCK_TASK=empty "$CLI" task abc --json > "$TMP/out" 2> "$TMP/err"; then
+  echo 'empty-assignees task JSON assertion failed:' >&2
+  sed -n '1p' "$TMP/err" >&2
+  exit 1
+fi
+jq -e '.assignees == []' "$TMP/out" >/dev/null
+for mode in invalid_id invalid_large invalid_user missing_assignees; do
+  if MOCK_TASK="$mode" "$CLI" task abc --json > "$TMP/out" 2> "$TMP/err"; then exit 1; else [ "$?" = 2 ]; fi
+  [ ! -s "$TMP/out" ]
+  ! grep -q 'Bad\|synthetic' "$TMP/err"
+done
+: > "$TMP/requests"
+MOCK_TASK=empty "$CLI" assign abc --me > "$TMP/out"
+grep -Fxq 'Assigned: abc' "$TMP/out"
+jq -e '.assignees.add == [7] and .assignees.rem == []' "$TMP/write" >/dev/null
+[ "$(awk '$1 == "PUT" && /\/api\/v2\/task\/abc$/ { count++ } END { print count+0 }' "$TMP/requests")" = 1 ]
+: > "$TMP/requests"
+MOCK_TASK=other MOCK_ASSIGN_PUT=preserved "$CLI" assign abc --me > "$TMP/out"
+grep -Fxq 'Assigned: abc' "$TMP/out"
+jq -e '.assignees.add == [7] and .assignees.rem == []' "$TMP/write" >/dev/null
+: > "$TMP/requests"
+MOCK_TASK=self_numeric "$CLI" assign abc --me > "$TMP/out"
+grep -Fxq 'Already assigned: abc' "$TMP/out"
+[ "$(wc -l < "$TMP/requests" | tr -d ' ')" = 2 ]
+: > "$TMP/requests"
+MOCK_TASK=self_string MOCK_USER=string "$CLI" assign abc --me > "$TMP/out"
+grep -Fxq 'Already assigned: abc' "$TMP/out"
+[ "$(wc -l < "$TMP/requests" | tr -d ' ')" = 2 ]
+: > "$TMP/requests"
+for args in 'abc' 'abc --them' 'abc --me --me' 'bad/id --me'; do
+  # Intentional splitting supplies a list of synthetic CLI arguments.
+  # shellcheck disable=SC2086
+  if "$CLI" assign $args > "$TMP/out" 2> "$TMP/err"; then exit 1; else [ "$?" = 1 ]; fi
+done
+[ ! -s "$TMP/requests" ]
+for mode in invalid missing denied; do
+  : > "$TMP/requests"
+  if MOCK_TASK=empty MOCK_USER="$mode" "$CLI" assign abc --me > "$TMP/out" 2> "$TMP/err"; then exit 1; else [ "$?" = 2 ]; fi
+  [ ! -s "$TMP/out" ]
+  [ "$(awk '$1 == "PUT" { count++ } END { print count+0 }' "$TMP/requests")" = 0 ]
+done
+for mode in missing_self dropped_other malformed no_assignees fail401 fail500; do
+  : > "$TMP/requests"
+  task_mode=empty; [ "$mode" != dropped_other ] || task_mode=other
+  if MOCK_TASK="$task_mode" MOCK_ASSIGN_PUT="$mode" "$CLI" assign abc --me > "$TMP/out" 2> "$TMP/err"; then exit 1; else [ "$?" = 2 ]; fi
+  [ ! -s "$TMP/out" ]
+  grep -qi 'check the task before retrying' "$TMP/err"
+  [ "$(awk '$1 == "PUT" { count++ } END { print count+0 }' "$TMP/requests")" = 1 ]
+  ! grep -q 'synthetic_test_credential\|"err"\|synthetic' "$TMP/out" "$TMP/err"
+done
 "$CLI" open --list 123 --assignee me > "$TMP/out"
 [ "$(wc -l < "$TMP/out" | tr -d ' ')" = 1 ]
 grep -q 'First' "$TMP/out"
 "$CLI" snapshot --since 2025-01-01 --list 123 > "$TMP/out"
 [ "$(wc -l < "$TMP/out" | tr -d ' ')" = 2 ]
 grep -q 'Second' "$TMP/out"
+# Each write assertion starts without artifacts from earlier assignment cases.
+rm -f "$TMP/write"
 if "$CLI" status abc REVIEW > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 3 ]; fi
 [ ! -e "$TMP/write" ]
 printf 'hello\nworld\n' | "$CLI" comment abc - > "$TMP/out"

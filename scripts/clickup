@@ -11,6 +11,7 @@ source "$ROOT/lib/clickup.sh"
 usage() {
   cat <<'USAGE'
 Usage: clickup task <id|url> [--json]
+       clickup assign <id|url> --me
        clickup status <id|url> <status>
        clickup comment <id|url> <file|->
        clickup comments <id|url> [--json] [--limit N]
@@ -34,7 +35,7 @@ task_id() {
 }
 [ "$#" -gt 0 ] || fail_usage
 command="$1"; shift
-case "$command" in --help|-h) [ "$#" -eq 0 ] || fail_usage; usage; exit 0 ;; task|status|comment|comments|open|snapshot|doc) ;; *) fail_usage ;; esac
+case "$command" in --help|-h) [ "$#" -eq 0 ] || fail_usage; usage; exit 0 ;; task|assign|status|comment|comments|open|snapshot|doc) ;; *) fail_usage ;; esac
 id=''; json=false; since=''; assignee=''; lists=()
 case "$command" in
   doc)
@@ -69,6 +70,7 @@ case "$command" in
       valid_id "$CLICKUP_WORKSPACE_ID" || { echo 'Set a valid CLICKUP_WORKSPACE_ID.' >&2; exit 1; }
     fi ;;
   task) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail_usage; id="$(task_id "$1")" || fail_usage; shift; if [ "$#" -gt 0 ]; then [ "$1" = --json ] || fail_usage; json=true; fi ;;
+  assign) [ "$#" -eq 2 ] && [ "$2" = --me ] || fail_usage; id="$(task_id "$1")" || fail_usage ;;
   comments)
     [ "$#" -ge 1 ] || fail_usage
     id="$(task_id "$1")" || fail_usage; shift
@@ -139,7 +141,36 @@ case "$command" in
   task)
     task="$(clickup_task "$id")" || api_error
     if ! printf '%s' "$task" | jq -e '.id and .name and .status.status and .list.name and .url' >/dev/null 2>&1; then api_error; fi
-    if "$json"; then printf '%s\n' "$task" | jq '{id, status: .status.status, title: .name, list: .list.name, url}'; else printf '%s\n' "$task" | jq -r '"id: \(.id)\nstatus: \(.status.status)\ntitle: \(.name)\nlist: \(.list.name)\nurl: \(.url)"'; fi ;;
+    if "$json"; then
+      task_assignees="$(clickup_task_assignees "$task")" || { echo 'ClickUp returned invalid task assignees.' >&2; api_error; }
+      printf '%s\n' "$task" | jq --argjson assignees "$task_assignees" '{id, status: .status.status, title: .name, list: .list.name, url, assignees:$assignees}'
+    else printf '%s\n' "$task" | jq -r '"id: \(.id)\nstatus: \(.status.status)\ntitle: \(.name)\nlist: \(.list.name)\nurl: \(.url)"'; fi ;;
+  assign)
+    task="$(clickup_task "$id")" || api_error
+    if ! printf '%s' "$task" | jq -e '.id and .assignees' >/dev/null 2>&1; then api_error; fi
+    task_assignees="$(clickup_task_assignees "$task")" || { echo 'ClickUp returned invalid task assignees.' >&2; api_error; }
+    user_id="$(clickup_user)" || { echo 'Could not validate the authenticated ClickUp user.' >&2; api_error; }
+    if printf '%s' "$task_assignees" | jq -e --arg user "$user_id" 'any(.[]; .id == $user)' >/dev/null; then
+      printf 'Already assigned: %s\n' "$id"
+      exit 0
+    fi
+    existing_ids="$(printf '%s' "$task_assignees" | jq -c '[.[].id]')" || api_error
+    if ! updated="$(clickup_update_assignees "$id" "$user_id")"; then
+      echo 'Assignment failed or could not be confirmed; check the task before retrying.' >&2
+      api_error
+    fi
+    updated_assignees="$(clickup_task_assignees "$updated")" || {
+      echo 'Assignment outcome could not be confirmed; check the task before retrying.' >&2
+      api_error
+    }
+    if ! printf '%s' "$updated_assignees" | jq -e --argjson existing "$existing_ids" --arg user "$user_id" '
+      [.[].id] as $after |
+      (($after | index($user)) != null) and all($existing[]; . as $id | ($after | index($id)) != null)
+    ' >/dev/null 2>&1; then
+      echo 'Assignment outcome could not be confirmed; check the task before retrying.' >&2
+      api_error
+    fi
+    printf 'Assigned: %s\n' "$id" ;;
   status)
     task="$(clickup_task "$id")" || api_error
     list="$(printf '%s' "$task" | jq -er '.list.id | select(. != null) | tostring')" || api_error

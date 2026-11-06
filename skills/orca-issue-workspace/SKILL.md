@@ -84,7 +84,7 @@ orca agent launch --agent <agent> --worktree issue:<N> \
 
 - `--effort` requires `--model`. Use the model and effort chosen by the owner or the routing guide; if a launch rejects the id, list the options with the agent's own help rather than guessing a different model.
 - Check it actually started: `orca terminal read --terminal <handle from the result> --screen --limit 30`.
-- For a task from a tracker with statuses, move it to the in-progress status after launch; ask the owner once if several statuses fit.
+- For a task from a tracker with statuses, move it to the in-progress status after launch when the session has explicit authorization for that tracker write; ask the owner once if several statuses fit or authorization is missing. For ClickUp, inspect the task's assignees during this handoff. If the current user is already assigned, do not write. If nobody is assigned, add yourself with `clickup assign <id|url> --me` only when explicit authorization covers the assignment. If only other people are assigned, ask the owner before adding yourself. Combine that question with any needed status-write authorization. Reading a task or starting the session alone does not authorize a tracker write; report self-assignment only after the authorized write succeeds. GitHub-only tasks skip ClickUp.
 
 **What the prompt must contain** (adapt, do not omit the rules):
 
