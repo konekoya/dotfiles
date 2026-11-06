@@ -28,6 +28,7 @@ Commands:
   list                         List active Azure DevOps PRs
   status [ID] [options]        Show CI/build status for a PR
   comments [ID]                Show comment threads for a PR
+  comment ID <file|->          Post a top-level Azure DevOps PR comment
   merge [ID] [options]         Preview a squash merge; --execute performs it
   open                         Open the current PR or repository page
 
@@ -96,6 +97,14 @@ EOF
     source "$PR_ROOT/lib/azure-devops.sh"
     unsupported_github
     source "$PR_ROOT/lib/pr-comments.sh"
+    ;;
+  comment)
+    if [ "$#" -eq 1 ] && { [ "$1" = --help ] || [ "$1" = -h ]; }; then
+      echo 'Usage: pr comment <positive-id> <file|->'
+      echo 'Post one top-level Azure DevOps thread from a UTF-8 file or stdin.'
+      exit 0
+    fi
+    source "$PR_ROOT/lib/pr-comment.sh"
     ;;
   merge)
     case " $* " in
