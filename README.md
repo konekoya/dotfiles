@@ -981,8 +981,10 @@ Keep these separate: **Git commit identity** is `user.name`/`user.email`; **Git 
 
 ### Azure DevOps work and personal accounts
 
-Store non-secret profile routing in `~/.gitconfig.local` and PATs in `alias/.env`.
-Create a uniquely named profile and matching PAT variable for each organization.
+Store non-secret profile routing and auth mode in `~/.gitconfig.local`. For
+`auth = pat` profiles only, store the matching PAT variable in `alias/.env` or
+provide it in the caller environment. Azure CLI profiles use their pinned account
+metadata and do not need a PAT variable. Create a uniquely named profile for each organization.
 The example below configures two company organizations and a personal organization;
 add more profiles as needed:
 
@@ -998,9 +1000,9 @@ add more profiles as needed:
 	auth = pat
 ```
 
-These are placeholder organizations and profile labels. Store each PAT under its
-matching variable in your local `alias/.env`; keep credential values out of Git,
-command arguments, and agent conversations.
+These are placeholder organizations and profile labels. For each `auth = pat`
+profile, store its PAT under the matching variable in your local `alias/.env`; keep
+credential values out of Git, command arguments, and agent conversations.
 
 | Repository profile | Organization placeholder | PAT variable |
 |--------------------|--------------------------|--------------|

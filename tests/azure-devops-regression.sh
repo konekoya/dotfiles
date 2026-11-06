@@ -534,6 +534,32 @@ AZURE_DEVOPS_PAT_PERSONAL='synthetic-script-personal-pat'
 export AZURE_DEVOPS_PAT_WORK AZURE_DEVOPS_PAT_PERSONAL
 export TMPDIR="$TEST_ROOT"
 
+# A missing profile gives setup guidance without exposing remote or synthetic credentials,
+# and stops before trying profile PAT, legacy auth, Azure CLI, or HTTP.
+MISSING_PROFILE_REPO="$(make_repo missing-profile 'https://synthetic-user:remote-credential-sentinel@dev.azure.com/missing-org/project/_git/repo')"
+cd "$MISSING_PROFILE_REPO" || fail "could not enter missing-profile repository"
+rm -f "$SCRIPT_HEADER_FILE" "$SCRIPT_AUTH_ARG_FILE" "$SCRIPT_URLS_FILE" "$ADO_TEST_AZ_CALLED_FILE"
+if PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" GET '/_apis/projects' > "$TEST_ROOT/missing-profile-output" 2>&1; then
+  fail "ado-rest accepted a repository without an authentication profile"
+fi
+missing_profile_output="$(cat "$TEST_ROOT/missing-profile-output")"
+case "$missing_profile_output" in
+  *'git config --local azure-devops.profile <name>'*) ;;
+  *) fail "missing-profile error omitted the exact profile selection command" ;;
+esac
+case "$missing_profile_output" in
+  *'organization and auth mode in Git config'*'auth = pat'*'AZURE_DEVOPS_PAT_<PROFILE>'*'alias/.env or the environment'*'AZURE_DEVOPS_ORG and AZURE_DEVOPS_PAT'*) ;;
+  *) fail "missing-profile error omitted safe actionable profile and legacy setup guidance" ;;
+esac
+assert_no_secret "$missing_profile_output" synthetic-script-work-pat
+assert_no_secret "$missing_profile_output" synthetic-script-personal-pat
+assert_no_secret "$missing_profile_output" remote-credential-sentinel
+assert_no_secret "$missing_profile_output" synthetic-user
+[ ! -s "$SCRIPT_URLS_FILE" ] || fail "missing-profile request reached HTTP"
+[ ! -e "$SCRIPT_HEADER_FILE" ] && [ ! -e "$SCRIPT_AUTH_ARG_FILE" ] || fail "missing-profile request created an auth header"
+[ ! -e "$ADO_TEST_AZ_CALLED_FILE" ] || fail "missing-profile request fell back to Azure CLI"
+cd "$SCRIPT_REPO" || fail "could not return to valid consumer repository"
+
 # ado-rest validates inputs, reports safe repository context, and pipes the auth header.
 context_json="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" "$FIXTURE_DOTFILES/scripts/ado-rest" context 2>&1)" || fail "ado-rest context failed: $context_json"
 assert_equal script-org "$(printf '%s' "$context_json" | jq -r '.organization')" "ado-rest organization context"
