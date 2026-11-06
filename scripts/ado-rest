@@ -8,9 +8,40 @@ source "$SCRIPT_DIR/../lib/azure-devops.sh"
 source "$SCRIPT_DIR/../lib/http.sh"
 source "$SCRIPT_DIR/../lib/local-env.sh"
 
-usage() {
-  echo "Usage: ado-rest context | GET|POST|PATCH|PUT|DELETE /_apis/... [JSON_BODY]" >&2
+print_usage() {
+  cat <<'USAGE'
+Usage: ado-rest context | GET|POST|PATCH|PUT|DELETE /_apis/... [JSON_BODY|-|@FILE]
+
+POST, PATCH and PUT require a JSON body; DELETE may omit it. Give the body as the
+third argument, '-' to read it from stdin, or '@FILE' to read it from a file (like
+curl -d). Build JSON with jq -n so quotes and newlines are escaped.
+
+Example (add a comment to a pull request thread):
+  body="$(jq -n --arg text 'Thanks, fixed.' '{content: $text, commentType: "text"}')"
+  ado-rest POST '/_apis/git/repositories/<repository>/pullrequests/<id>/threads/<thread>/comments?api-version=7.1' "$body"
+
+The same body from stdin or a file:
+  jq -n --arg text 'Thanks, fixed.' '{content: $text, commentType: "text"}' | ado-rest POST '/_apis/...' -
+  ado-rest POST '/_apis/...' @body.json
+USAGE
 }
+
+usage() {
+  print_usage >&2
+}
+
+# Report a request or body problem with the usage and a write example, so the failure explains itself.
+body_error() {
+  echo "❌ $1" >&2
+  usage
+  exit 2
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) print_usage; exit 0 ;;
+  esac
+done
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
   usage
@@ -53,21 +84,35 @@ else
       exit 2
       ;;
   esac
+  body_source="argument"
   if [ "$method" = GET ] && [ "$#" -eq 3 ]; then
-    echo "❌ GET requests do not accept a body." >&2
-    exit 2
+    body_error "GET requests do not accept a body."
+  fi
+  if [ "$#" -eq 3 ]; then
+    case "$body" in
+      -|@-)
+        if [ -t 0 ]; then
+          body_error "${method} body '-' reads stdin, but stdin is a terminal. Pipe the JSON in."
+        fi
+        body_source="stdin"
+        body="$(cat)" || body_error "Could not read the ${method} request body from stdin."
+        ;;
+      @*)
+        body_file="${body#@}"
+        if [ -z "$body_file" ] || [ ! -f "$body_file" ] || [ ! -r "$body_file" ]; then
+          body_error "${method} body file is missing or unreadable."
+        fi
+        body_source="file"
+        body="$(cat "$body_file")" || body_error "Could not read the ${method} request body file."
+        ;;
+    esac
   fi
   if { [ "$method" = POST ] || [ "$method" = PATCH ] || [ "$method" = PUT ]; } && [ "$#" -ne 3 ]; then
-    echo "❌ ${method} requests require a JSON body argument." >&2
-    exit 2
+    body_error "${method} requests require a JSON body argument ('-' for stdin, '@FILE' for a file)."
   fi
-  if [ "$method" = DELETE ] && [ "$#" -eq 3 ] && ! printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
-    echo "❌ DELETE request body must be valid JSON." >&2
-    exit 2
-  fi
-  if { [ "$method" = POST ] || [ "$method" = PATCH ] || [ "$method" = PUT ]; } && ! printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
-    echo "❌ ${method} request body must be valid JSON." >&2
-    exit 2
+  if { [ "$method" = POST ] || [ "$method" = PATCH ] || [ "$method" = PUT ] || [ "$method" = DELETE ]; } \
+    && [ "$#" -eq 3 ] && ! printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
+    body_error "${method} request body must be valid JSON (read from ${body_source})."
   fi
 fi
 

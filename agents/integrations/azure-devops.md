@@ -13,3 +13,24 @@ need the owner's approval of that PR in this session: `pr merge ID --execute --h
 (pinned to the previewed head, never bypassing policy), `--waive-checklist` is the owner's
 decision to merge past unticked or stale checklist items, and `pr merge ID --requeue-expired`
 requeues expired build evaluations only. It does not support GitHub remotes.
+
+## Write calls
+
+`ado-rest --help` prints the usage with a write example; every body error repeats it.
+`POST`, `PATCH`, and `PUT` need a JSON body, `DELETE` may omit it, and `GET` takes none.
+Pass the body as the third argument, `-` to read it from stdin, or `@FILE` to read it
+from a file. Build the JSON with `jq -n` instead of quoting it by hand.
+
+```sh
+# Add a comment to an existing pull request thread.
+body="$(jq -n --arg text 'Thanks, fixed.' '{content: $text, commentType: "text"}')"
+ado-rest POST '/_apis/git/repositories/<repository>/pullrequests/<id>/threads/<thread>/comments?api-version=7.1' "$body"
+
+# Start a new thread; the body can come from stdin.
+jq -n --arg text 'Please check this.' \
+  '{comments: [{parentCommentId: 0, content: $text, commentType: "text"}], status: "active"}' |
+  ado-rest POST '/_apis/git/repositories/<repository>/pullrequests/<id>/threads?api-version=7.1' -
+```
+
+Do not pipe the output into `jq` with `2>&1`: error text is not JSON and hides the real
+message. Keep stderr separate when filtering a response.
