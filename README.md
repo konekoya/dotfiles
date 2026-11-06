@@ -549,8 +549,8 @@ The command is read-only and requires `jq` and `curl`.
 ### `pr`
 
 Lists, inspects and merges pull requests or opens the current PR. Azure DevOps
-supports all subcommands; GitHub supports `pr open` only (merge GitHub PRs with the
-`merge-pr` skill).
+supports all subcommands; GitHub supports `pr list`, `pr status`, and `pr open`
+(merge GitHub PRs with the `merge-pr` skill).
 
 ```sh
 pr                         # same as pr list
@@ -572,12 +572,28 @@ Every subcommand supports `--help`. `pr status --json` cannot be combined with
 
 - `pullRequestId`: numeric PR identifier.
 - `organization`, `project`, `repository`: safe names resolved from the selected
-  Azure DevOps remote and profile.
+  Azure DevOps remote and profile. For GitHub, organization is the selected owner,
+  project is null, and repository is the selected repository name.
 - `state`: `failed`, `pending`, `succeeded`, or `none`.
 - `checks`: array of build policy snapshots, each with `state` (`failed`,
   `pending`, `succeeded`, or `unknown`) and numeric-or-null `buildId`.
 
-The snapshot contains no URLs or authentication data.
+The snapshot contains no URLs or authentication data. GitHub checks always have
+`buildId: null`. GitHub status reads the current head check rollup and review metadata
+on each poll. Both an empty rollup and an explicit null rollup mean `none`; missing
+or malformed rollup data fails safely. Unknown check states yield pending overall.
+Completed neutral/skipped checks count as succeeded; cancelled/timed-out checks count
+as failed. CI status does not establish merge readiness.
+
+For GitHub, `pr list` groups open PRs in the selected repository as created by you
+and awaiting your review. Each list query (including branch lookup) has a safety cap
+of 1000 results; reaching the cap fails instead of showing an incomplete result.
+Automatic status lookup requires exactly one open PR with the exact current named
+branch and selected source repository. Fork PRs hosted in another base repository
+require selecting that repository and passing an explicit ID. The command never
+guesses or switches to an upstream repository. GitHub list/status use `gh-auth`
+with an explicit repository and require no Azure profile. They print no raw API
+errors, CI logs, or URLs. `pr comments` and `pr merge` remain Azure DevOps only.
 
 #### `pr merge`
 
@@ -641,7 +657,7 @@ Repository commands use the matching profile selected with
 `git config --local azure-devops.profile work-company-a`. `AZURE_DEVOPS_ORG` never replaces
 an organization parsed from a remote.
 
-**Requires:** `jq`, `curl`
+**Requires:** `jq`, `curl` for Azure DevOps; `jq`, `gh`, and `gh-auth` for GitHub.
 
 Automatic status and comment lookup use the project and repository identified by
 the selected remote and select an active PR. Pass an explicit ID to inspect a

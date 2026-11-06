@@ -25,7 +25,7 @@ usage() {
 Usage: pr <command> [options]
 
 Commands:
-  list                         List active Azure DevOps PRs
+  list                         List your active Azure DevOps or GitHub PRs
   status [ID] [options]        Show CI/build status for a PR
   comments [ID]                Show comment threads for a PR
   merge [ID] [options]         Preview a squash merge; --execute performs it
@@ -60,15 +60,25 @@ case "$COMMAND" in
       esac
     fi
     source "$PR_ROOT/lib/azure-devops.sh"
-    unsupported_github
-    source "$PR_ROOT/lib/pr-list.sh"
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      if ! ado_resolve_remote_context; then
+        echo "❌ ${ADO_REMOTE_ERROR}" >&2
+        exit 1
+      fi
+    fi
+    if [ "${ADO_REMOTE_PROVIDER:-}" = github ]; then
+      source "$PR_ROOT/lib/pr-github.sh"
+      pr_github_list
+    else
+      source "$PR_ROOT/lib/pr-list.sh"
+    fi
     ;;
   status)
     case " $* " in
       *" --help "*|*" -h "*)
         cat <<'EOF'
 Usage: pr status [ID] [--watch] [--interval SECONDS] [--json]
-Show CI/build policy status for the current branch's PR or the specified PR.
+Show CI status for the current branch's PR or the specified PR (not merge readiness).
 EOF
         exit 0
         ;;
@@ -80,8 +90,16 @@ EOF
         ;;
     esac
     source "$PR_ROOT/lib/azure-devops.sh"
-    unsupported_github
-    source "$PR_ROOT/lib/pr-status.sh"
+    if ! ado_resolve_remote_context; then
+      echo "❌ ${ADO_REMOTE_ERROR}" >&2
+      exit 1
+    fi
+    if [ "$ADO_REMOTE_PROVIDER" = github ]; then
+      source "$PR_ROOT/lib/pr-github.sh"
+      pr_github_status "$@"
+    else
+      source "$PR_ROOT/lib/pr-status.sh"
+    fi
     ;;
   comments)
     case " $* " in
