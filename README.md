@@ -699,6 +699,14 @@ newest first. `--json` returns an array of objects with string `id`, `author`,
 `date` (Unix milliseconds), and `text`; human output shows those fields as blocks.
 Posting a comment prints `Comment posted: <id>`, which matches its ID in comments.
 If the post response cannot be confirmed, check comments before retrying.
+Comments accept a limited Markdown subset: simple bold, inline code, HTTP(S) links,
+flat bullet lists, sequential numbered lists starting at 1, and plain fenced code
+blocks. Headings with one to three `#` markers become bold lines. Nested, ambiguous,
+malformed, and other unsupported syntax stays literal; code fences with a language
+are literal. ClickUp's comment formatting guide documents structured comment blocks,
+but its Create Task Comment reference lists only `comment_text` as required. Actual
+endpoint acceptance requires a real-service check; if blocks cannot be used, the
+implementation must return to plain-text posting. It does not retry automatically.
 Status names are matched case-insensitively
 against the task's list; unknown or ambiguous names leave the task unchanged.
 Without `--list`, open and snapshot read `~/.clickup_lists.json`, an array of

@@ -60,7 +60,65 @@ clickup_update_assignees() {
 }
 clickup_comment() {
   local body
-  body="$(jq -n --arg comment "$2" '{comment_text:$comment}')" || return 1
+  body="$(jq -n --arg input "$2" '
+    def plain: {text:., attributes:{}};
+    # Parse only complete, unnested inline forms; otherwise preserve the whole line.
+    def inline:
+      . as $line |
+      def tokens:
+        if . == "" then [] else
+          [match("\\*\\*[^*`\\[\\]]+\\*\\*|`[^`*\\[\\]]+`|\\[[^][*`]+\\]\\(https?://[^()[:space:]]+\\)")] as $matches | $matches[0] as $m |
+          if $m == null then [plain] else
+            .[0:$m.offset] as $before | .[$m.offset:$m.offset+$m.length] as $token |
+            (if $before == "" then [] else [$before | plain] end) +
+            [if ($token | startswith("**")) then {text:$token[2:-2],attributes:{bold:true}}
+             elif ($token | startswith("`")) then {text:$token[1:-1],attributes:{code:true}}
+             else ($token | capture("^\\[(?<label>[^]]+)\\]\\((?<url>.*)\\)$")) |
+               {text:.label,attributes:{link:.url}} end] +
+            (.[($m.offset+$m.length):] | tokens)
+          end
+        end;
+      (tokens) as $parts |
+      if ($line | test("!\\[|\\\\[*`\\[]")) or
+         any($parts[]; .attributes == {} and (.text | test("[*`\\[\\]]")))
+      then [$line | plain] else $parts end;
+    def newline($attrs): {text:"\n",attributes:$attrs};
+    def lines($xs):
+      if ($xs | length) == 0 then [] else
+        $xs[0] as $line | $xs[1:] as $rest |
+        if $line == "```" and ($rest | index("```")) != null then
+          ($rest | index("```")) as $end |
+          ([$rest[:$end][] | (if . == "" then empty else plain end),
+            newline({"code-block":{"code-block":"plain"}})]) +
+          (if ($rest | length) > ($end + 1) then lines($rest[($end+1):]) else [] end)
+        elif ($line | startswith("```")) then
+          if ($rest | index("```")) != null then
+            ($rest | index("```")) as $end |
+            [([$line] + $rest[:($end+1)] | join("\n")) | plain] +
+            (if ($rest | length) > ($end + 1) then [newline({})] + lines($rest[($end+1):]) else [] end)
+          else [($xs | join("\n")) | plain] end
+        elif ($line | test("^#{1,3} [^*`\\[\\]]+$")) then
+          [{text:($line | sub("^#{1,3} "; "")),attributes:{bold:true}}] +
+          (if ($rest | length) > 0 then [newline({})] + lines($rest) else [] end)
+        elif ($line | test("^[-*+] [^[:space:]].*$")) and
+             (($rest[0] // "") | test("^ +([-*+] |[0-9]+\\. )") | not) and
+             (($line[2:] | inline) != [$line[2:] | plain] or ($line[2:] | test("[*`\\[\\]]") | not)) then
+          ($line[2:] | inline) + [newline({list:{list:"bullet"}})] +
+          (if ($rest | length) > 0 then lines($rest) else [] end)
+        elif ($line | test("^1\\. [^[:space:]].*$")) and
+             (($rest[0] // "") | test("^ +([-*+] |[0-9]+\\. )") | not) then
+          ([range(0; $xs | length) as $i | select($xs[$i] | test("^[0-9]+\\. [^[:space:]].*$")) | $i] |
+            reduce .[] as $i ([]; if $i == length then . + [$i] else . end)) as $indices |
+          ($indices | length) as $count |
+          if all($indices[]; . as $i | ($xs[$i] | capture("^(?<n>[0-9]+)\\. (?<text>.*)$")) |
+               (.n == (($i + 1) | tostring)) and ((.text | test("[*`\\[\\]]")) | not)) then
+            ([$indices[] as $i | ($xs[$i] | sub("^[0-9]+\\. "; "") | plain), newline({list:{list:"ordered"}})] + lines($xs[$count:]))
+          else [$line | plain] + (if ($rest | length) > 0 then [newline({})] + lines($rest) else [] end) end
+        elif ($line | test("^#{1,6} |^ +([-*+] |[0-9]+\\. )")) then
+          [$line | plain] + (if ($rest | length) > 0 then [newline({})] + lines($rest) else [] end)
+        else ($line | inline) + (if ($rest | length) > 0 then [newline({})] + lines($rest) else [] end)
+        end end;
+    {comment: (lines($input | split("\n")))}')" || return 1
   clickup_request -X POST -H 'Content-Type: application/json' -d "$body" "https://api.clickup.com/api/v2/task/$1/comment"
 }
 # Return one normalized array only after every required page has succeeded.

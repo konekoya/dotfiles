@@ -58,6 +58,8 @@ fi
 case "$url" in
   */task/abc/comment*)
     case "${MOCK_COMMENTS:-pages}" in
+      roundtrip)
+        jq -cn --slurpfile posted "$MOCK_DIR/write" '{comments:[{id:"comment-1",date:"10000",user:{username:"Reader"},comment:$posted[0].comment}]}' | tr -d "\n"; printf '\n200' ;;
       fail) printf '{}\n500' ;;
       malformed) printf '{"comments":{}}\n200' ;;
       empty) printf '{"comments":[]}\n200' ;;
@@ -176,7 +178,58 @@ if "$CLI" status abc REVIEW > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 3 ]; f
 [ ! -e "$TMP/write" ]
 printf 'hello\nworld\n' | "$CLI" comment abc - > "$TMP/out"
 grep -Fxq 'Comment posted: comment-1' "$TMP/out"
-jq -e '.comment_text == "hello\nworld\n"' "$TMP/write" >/dev/null
+jq -e '[.comment[].text] | join("") == "hello\nworld\n"' "$TMP/write" >/dev/null
+MOCK_COMMENTS=roundtrip "$CLI" comments abc --json > "$TMP/out"
+jq -e '.[0].text == "hello\nworld\n"' "$TMP/out" >/dev/null
+cat > "$TMP/comment.md" <<'COMMENT'
+# One
+## Two
+### Three
+**bold** and `code` and [label](https://example.invalid/path)
+- bullet
+1. first
+2. second
+```
+code "quoted" \ Unicode: 測試
+second line
+```
+COMMENT
+"$CLI" comment abc "$TMP/comment.md" > "$TMP/out"
+grep -Fxq 'Comment posted: comment-1' "$TMP/out"
+jq -e '
+  [.comment[] | select(.attributes.bold == true) | .text] == ["One", "Two", "Three", "bold"] and
+  any(.comment[]; .text == "code" and .attributes.code == true) and
+  any(.comment[]; .text == "label" and .attributes.link == "https://example.invalid/path") and
+  any(.comment[]; .attributes.list.list == "bullet") and
+  ([.comment[] | select(.attributes.list.list == "ordered")] | length) == 2 and
+  ([.comment[] | select(.attributes["code-block"]["code-block"] == "plain")] | length) == 2 and
+  any(.comment[]; .text == "second line") and
+  any(.comment[]; .text == "code \"quoted\" \\ Unicode: 測試")' "$TMP/write" >/dev/null
+cat > "$TMP/comment.md" <<'COMMENT'
+# Unmatched **marker
+*italic* and **unfinished
+~~strike~~
+[broken](url
+```language
+**literal**
+```
+COMMENT
+"$CLI" comment abc "$TMP/comment.md" > "$TMP/out"
+jq -e --rawfile expected "$TMP/comment.md" '[.comment[].text] | join("") == $expected' "$TMP/write" >/dev/null
+jq -e 'all(.comment[]; .attributes == {})' "$TMP/write" >/dev/null
+cat > "$TMP/comment.md" <<'COMMENT'
+- parent
+  - **nested**
+1. first
+3. third
+![image](https://example.invalid/image)
+\**escaped**
+```
+**unclosed**
+COMMENT
+"$CLI" comment abc "$TMP/comment.md" > "$TMP/out"
+jq -e --rawfile expected "$TMP/comment.md" '[.comment[].text] | join("") == $expected' "$TMP/write" >/dev/null
+jq -e 'all(.comment[]; .attributes == {})' "$TMP/write" >/dev/null
 # Reads use normalized output, bounded pages, and safe cursor parameters.
 : > "$TMP/requests"
 "$CLI" comments 'https://example.invalid/t/abc/?view=1#section' --json > "$TMP/out"
