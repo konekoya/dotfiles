@@ -1,0 +1,71 @@
+#!/bin/bash
+# Description: Estimate GitHub Copilot AI-credit cost in TWD using a configurable rate
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: copilot-cost CREDITS [--rate NTD_PER_CREDIT]
+       copilot-cost --help
+
+Estimate a New Taiwan dollar amount from AI credits. This is not a bill.
+Default rate: NT$0.29 per credit (rough estimate).
+
+Examples:
+  copilot-cost 250
+  copilot-cost 250 --rate 0.289
+  COPILOT_NTD_PER_CREDIT=0.30 copilot-cost 250
+
+Set COPILOT_NTD_PER_CREDIT in your local shell config to change the default
+without editing this script. --rate overrides the environment variable.
+EOF
+}
+
+fail() {
+  printf 'copilot-cost: %s\n' "$1" >&2
+  printf 'Try: copilot-cost --help\n' >&2
+  exit 2
+}
+
+rate="${COPILOT_NTD_PER_CREDIT:-0.29}"
+credits=""
+
+while (( $# > 0 )); do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --rate)
+      (( $# >= 2 )) || fail "--rate requires a value"
+      rate="$2"
+      shift 2
+      ;;
+    --*)
+      fail "unknown option: $1"
+      ;;
+    -*)
+      fail "invalid credits or option: $1"
+      ;;
+    *)
+      [[ -z "$credits" ]] || fail "provide exactly one credits amount"
+      credits="$1"
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$credits" ]] || fail "credits are required"
+
+# Accept plain nonnegative decimal numbers only, never awk expressions.
+number_pattern='^[0-9]+([.][0-9]+)?$'
+[[ "$credits" =~ $number_pattern ]] || fail "credits must be a nonnegative number"
+[[ "$rate" =~ $number_pattern ]] || fail "rate must be a positive number"
+
+LC_ALL=C awk -v credits="$credits" -v rate="$rate" '
+  BEGIN {
+    if ((rate + 0) <= 0) exit 2
+    printf "Estimated: NT$%.2f\n", credits * rate
+    printf "Rate: NT$%.4f per credit (approximate, not an invoice)\n", rate
+  }
+' || fail "rate must be greater than zero"
