@@ -126,6 +126,12 @@ Canonical Git configuration files linked into the user's home directory by `inst
 
 ## Verification
 
+- Run `./scripts/check-all` for all documented syntax, whitespace (unstaged and
+  staged), ShellCheck, and regression checks. It reports each result, continues
+  after failures, and exits nonzero if any fail. Use `--verbose` for check output;
+  default output is status only. CI keeps explicit commands, with coverage drift
+  checked by `tests/ci-workflow-regression.sh`.
+
 - For shell changes, check syntax and whitespace:
 
   ```sh

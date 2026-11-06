@@ -1,0 +1,64 @@
+#!/bin/bash
+# Description: Run repository syntax, whitespace, ShellCheck, and regression checks
+
+usage() {
+  printf '%s\n' 'Usage: check-all [--verbose | --help]' \
+    '  Run every check, report PASS/FAIL, and exit nonzero if any fail.' \
+    '  --verbose  Show captured check output (hidden by default).'
+}
+
+verbose=false
+if [ "$#" -gt 0 ]; then
+  [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+  case "$1" in
+    --verbose) verbose=true ;;
+    --help|-h) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+fi
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
+cd "$REPO_ROOT" || exit 1
+umask 077
+CAPTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/check-all.XXXXXX")" || exit 1
+trap 'rm -rf "$CAPTURE_DIR"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+failures=0
+steps=0
+
+run_step() {
+  local label="$1" result
+  shift
+  steps=$((steps + 1))
+  printf 'STEP: %s\n' "$label"
+  if ! command -v "$1" >/dev/null 2>&1; then
+    printf 'FAIL: %s (missing %s)\n' "$label" "$1"
+    failures=$((failures + 1))
+    return
+  fi
+  "$@" > "$CAPTURE_DIR/output" 2>&1
+  result=$?
+  if [ "$verbose" = true ]; then cat "$CAPTURE_DIR/output"; fi
+  if [ "$result" -eq 0 ]; then
+    printf 'PASS: %s\n' "$label"
+  else
+    printf 'FAIL: %s (exit %s)\n' "$label" "$result"
+    failures=$((failures + 1))
+  fi
+}
+
+for file in install.sh scripts/* lib/*.sh tests/*.sh; do
+  run_step "Bash syntax: $file" /bin/bash -n "$file"
+done
+for file in alias/.alias alias/.git_alias alias/.util_alias zsh/.zshrc.shared; do
+  run_step "Zsh syntax: $file" zsh -n "$file"
+done
+run_step 'Whitespace: unstaged' git diff --check
+run_step 'Whitespace: staged' git diff --cached --check
+run_step 'ShellCheck' shellcheck -S warning -x install.sh scripts/* lib/*.sh tests/*.sh
+for file in tests/*.sh; do
+  run_step "Regression: $file" /bin/bash "$file"
+done
+printf 'Checks: %s steps, %s failed\n' "$steps" "$failures"
+[ "$failures" -eq 0 ]
