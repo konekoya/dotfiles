@@ -483,7 +483,7 @@ ado_get_auth_header() {
   if declare -F local_env_load >/dev/null 2>&1; then local_env_load AZURE_DEVOPS_ORG AZURE_DEVOPS_PAT; fi
   expected_org="${AZURE_DEVOPS_ORG:-}"
   if [ -z "$expected_org" ]; then
-    ADO_AUTH_ERROR="No Azure DevOps authentication profile is selected. Configure a per-repository profile, or set both AZURE_DEVOPS_ORG and AZURE_DEVOPS_PAT for one organization."
+    ADO_AUTH_ERROR="No Azure DevOps authentication profile is selected. Configure one with: git config --local azure-devops.profile <name>. Define its organization and auth mode in Git config; for auth = pat, set AZURE_DEVOPS_PAT_<PROFILE> in alias/.env or the environment. Alternatively, keep the legacy single-org AZURE_DEVOPS_ORG and AZURE_DEVOPS_PAT pair."
     return 1
   fi
   if ! ado_same_value "$expected_org" "$ADO_ORG"; then
