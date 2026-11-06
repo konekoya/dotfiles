@@ -838,6 +838,22 @@ bookmark
 Directory names containing quotes, dollar signs, backticks, or newlines are
 escaped both when loading the alias file and when running the alias.
 
+### `copilot-cost`
+
+Estimates a Copilot AI-credit amount in New Taiwan dollars using an adjustable
+reference rate. This is a quick budgeting estimate, **not an invoice**. It does not
+contact GitHub or read your usage history. The built-in rate is NT$0.29/credit.
+
+```sh
+copilot-cost 250                   # Estimated: NT$72.50
+copilot-cost 250 --rate 0.289      # use a one-off reference rate
+```
+
+To keep a different rate across sessions, set `COPILOT_NTD_PER_CREDIT` in your
+machine-local `zsh/.zshrc.local` (or another local shell config), for example
+`export COPILOT_NTD_PER_CREDIT=0.30`. The `--rate` option takes precedence.
+Update the rate whenever you have a newer reliable billing comparison.
+
 ### `gen-tax-id`
 
 Generates a valid Taiwan 統一編號 (Unified Business Number).
