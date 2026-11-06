@@ -635,6 +635,7 @@ Read and update ClickUp tasks and Docs without interactive prompts. Requires `jq
 clickup task example123 --json
 clickup status example123 "In Progress"
 clickup comment example123 ./comment.txt
+clickup comments example123 --json --limit 50
 printf 'A comment\n' | clickup comment example123 -
 clickup open --list 12345 --assignee me
 clickup snapshot --since 2026-01-01 --list 12345
@@ -652,7 +653,13 @@ They list a Doc's page tree, create Markdown pages or subpages,
 and replace page content; use `-` to read content from stdin. Page creation
 prints the new ID and a reminder to add attachments in the ClickUp UI.
 
-Task IDs can also be full task URLs. Status names are matched case-insensitively
+Task IDs can also be full task URLs. Read task comments with `clickup comments`:
+it shows the latest 25 by default, or up to a positive `--limit` (maximum 999999),
+newest first. `--json` returns an array of objects with string `id`, `author`,
+`date` (Unix milliseconds), and `text`; human output shows those fields as blocks.
+Posting a comment prints `Comment posted: <id>`, which matches its ID in comments.
+If the post response cannot be confirmed, check comments before retrying.
+Status names are matched case-insensitively
 against the task's list; unknown or ambiguous names leave the task unchanged.
 Without `--list`, open and snapshot read `~/.clickup_lists.json`, an array of
 objects with `id` and `name` as used by `create-clickup-task`. Both commands

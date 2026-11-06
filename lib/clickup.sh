@@ -26,7 +26,38 @@ clickup_update_status() {
 clickup_comment() {
   local body
   body="$(jq -n --arg comment "$2" '{comment_text:$comment}')" || return 1
-  clickup_request -X POST -H 'Content-Type: application/json' -d "$body" "https://api.clickup.com/api/v2/task/$1/comment" >/dev/null
+  clickup_request -X POST -H 'Content-Type: application/json' -d "$body" "https://api.clickup.com/api/v2/task/$1/comment"
+}
+# Return one normalized array only after every required page has succeeded.
+clickup_comments() {
+  local id="$1" limit="$2" result='[]' response page count cursor previous='' seen='|' url
+  while :; do
+    url="https://api.clickup.com/api/v2/task/${id}/comment"
+    [ -z "$previous" ] || url="${url}?${previous}"
+    response="$(clickup_request "$url")" || return 1
+    page="$(printf '%s' "$response" | jq -ce '
+      if (.comments | type) != "array" then error("invalid comments") else .comments end |
+      map(if type != "object" or ((.id | type) != "string" and (.id | type) != "number") or
+             ((.id | tostring) | test("^[A-Za-z0-9_-]+$") | not) or
+             ((.date | type) != "string" and (.date | type) != "number") or
+             ((.date | tostring) | test("^[0-9]+$") | not) or
+             (.user.username | type) != "string" then error("invalid comment")
+          else {id: (.id | tostring), author: .user.username, date: (.date | tostring),
+                text: (if (.comment_text | type) == "string" then .comment_text
+                       elif (.comment | type) == "array" and all(.comment[]; (.text | type) == "string")
+                       then [.comment[].text] | join("") else error("invalid text") end)} end)' 2>/dev/null)" || return 1
+    count="$(printf '%s' "$page" | jq 'length')" || return 1
+    result="$(printf '%s\n%s\n' "$result" "$page" | jq -cs --argjson limit "$limit" '(.[0] + .[1])[:$limit]')" || return 1
+    if [ "$count" -gt 0 ]; then
+      cursor="$(printf '%s' "$page" | jq -r 'last | "start_id=\(.id)&start=\(.date)"')" || return 1
+      case "$seen" in *"|$cursor|"*) return 1 ;; esac
+      seen="${seen}${cursor}|"
+      previous="$cursor"
+    fi
+    [ "$(printf '%s' "$result" | jq 'length')" -lt "$limit" ] || break
+    [ "$count" -eq 25 ] || break
+  done
+  printf '%s\n' "$result"
 }
 clickup_tasks() {
   local list="$1" page=0 response count last

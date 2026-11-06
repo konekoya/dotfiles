@@ -32,12 +32,38 @@ esac
 case "$url" in *'/docs/fail/'*) printf '{}\n404'; exit ;; esac
 if [ "$method" != GET ]; then
   printf '%s' "$body" > "$MOCK_DIR/write"
-  if [ "$method" = POST ]; then printf '{"id":"new-page"}\n201'
+  if [ "$method" = POST ] && [[ "$url" == */comment ]]; then
+    case "${MOCK_POST:-ok}" in
+      ok) printf '{"id":"comment-1"}\n200' ;;
+      bad) printf '{"id":null}\n200' ;;
+      fail) printf '{}\n500' ;;
+    esac
+  elif [ "$method" = POST ]; then printf '{"id":"new-page"}\n201'
   elif [ "$method" = PUT ] && [[ "$url" == */api/v3/* ]]; then printf '\n200'
   else printf '{}\n200'; fi
   exit
 fi
 case "$url" in
+  */task/abc/comment*)
+    case "${MOCK_COMMENTS:-pages}" in
+      fail) printf '{}\n500' ;;
+      malformed) printf '{"comments":{}}\n200' ;;
+      empty) printf '{"comments":[]}\n200' ;;
+      long)
+        jq -cn '{comments: [range(1;26) | {id: ("long-" + tostring), date: (10000 + . | tostring), user: {username:"Reader"}, comment_text: ("x" * 12000)}]}' | tr -d "\n"; printf '\n200' ;;
+      pages|later_fail|repeat)
+        case "$url" in
+          *'start_id='*)
+            case "${MOCK_COMMENTS:-pages}" in
+              later_fail) printf '{}\n500'; exit ;;
+              repeat) jq -cn '{comments: [range(1;26) | {id: ("comment-" + tostring), date: (10000 + . | tostring), user: {username:"Reader"}, comment_text:"repeat"}]}' | tr -d "\n"; printf '\n200'; exit ;;
+            esac ;;
+        esac
+        case "$url" in
+          *'start_id=comment-25&start=10025') printf '{"comments":[{"id":"comment-26","date":"10026","user":{"username":"Reader"},"comment":[{"text":"rich "},{"text":"text\\n"}]}]}\n200' ;;
+          *) jq -cn '{comments: [range(1;26) | {id: ("comment-" + tostring), date: (10000 + . | tostring), user: {username:"Reader"}, comment_text: ("text " + tostring)}]}' | tr -d "\n"; printf '\n200' ;;
+        esac ;;
+    esac ;;
   *'/docs/doc-1/page_listing?max_page_depth=-1') printf '[{"id":"p1","name":"Root","pages":[{"id":"p2","name":"Child"}]}]\n200' ;;
   */task/fail) printf '{}\n404' ;;
   */task/abc) printf '{"id":"abc","name":"Sample\001 task","status":{"status":"Open"},"list":{"id":"123","name":"Example"},"url":"https://example.invalid/t/abc"}\n200' ;;
@@ -64,8 +90,45 @@ grep -q 'First' "$TMP/out"
 grep -q 'Second' "$TMP/out"
 if "$CLI" status abc REVIEW > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 3 ]; fi
 [ ! -e "$TMP/write" ]
-printf 'hello\nworld\n' | "$CLI" comment abc -
+printf 'hello\nworld\n' | "$CLI" comment abc - > "$TMP/out"
+grep -Fxq 'Comment posted: comment-1' "$TMP/out"
 jq -e '.comment_text == "hello\nworld\n"' "$TMP/write" >/dev/null
+# Reads use normalized output, bounded pages, and safe cursor parameters.
+: > "$TMP/requests"
+"$CLI" comments 'https://example.invalid/t/abc/?view=1#section' --json > "$TMP/out"
+jq -e 'length == 25 and .[0] == {id:"comment-1",author:"Reader",date:"10001",text:"text 1"}' "$TMP/out" >/dev/null
+[ "$(wc -l < "$TMP/requests" | tr -d ' ')" = 1 ]
+: > "$TMP/requests"
+"$CLI" comments abc --limit 26 --json > "$TMP/out"
+jq -e 'length == 26 and .[25].text == "rich text\n"' "$TMP/out" >/dev/null
+grep -Fq '?start_id=comment-25&start=10025' "$TMP/requests"
+[ "$(wc -l < "$TMP/requests" | tr -d ' ')" = 2 ]
+"$CLI" comments abc --limit 1 > "$TMP/out"
+grep -Fxq 'id: comment-1' "$TMP/out"
+MOCK_COMMENTS=long "$CLI" comments abc --json > "$TMP/out"
+jq -e 'length == 25 and all(.[]; (.text | length) == 12000)' "$TMP/out" >/dev/null
+MOCK_COMMENTS=empty "$CLI" comments abc --json > "$TMP/out"
+jq -e '. == []' "$TMP/out" >/dev/null
+for mode in fail malformed later_fail repeat; do
+  if MOCK_COMMENTS="$mode" "$CLI" comments abc --limit 51 > "$TMP/out" 2> "$TMP/err"; then exit 1; else [ "$?" = 2 ]; fi
+  [ ! -s "$TMP/out" ]
+done
+if MOCK_COMMENTS=repeat "$CLI" comments abc --limit 50 > "$TMP/out" 2> "$TMP/err"; then exit 1; else [ "$?" = 2 ]; fi
+[ ! -s "$TMP/out" ]
+: > "$TMP/requests"
+for args in '--limit 0' '--limit nope' '--limit 1000000' '--json --json' '--limit 1 --limit 2' '--unknown'; do
+  # Intentional splitting supplies a list of synthetic CLI arguments.
+  # shellcheck disable=SC2086
+  if "$CLI" comments abc $args > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 1 ]; fi
+done
+[ ! -s "$TMP/requests" ]
+: > "$TMP/requests"
+if printf 'test' | MOCK_POST=bad "$CLI" comment abc - > "$TMP/out" 2> "$TMP/err"; then exit 1; else [ "$?" = 2 ]; fi
+[ ! -s "$TMP/out" ]
+grep -Fq 'may have been posted' "$TMP/err"
+[ "$(wc -l < "$TMP/requests" | tr -d ' ')" = 1 ]
+if printf 'test' | MOCK_POST=fail "$CLI" comment abc - > "$TMP/out" 2> "$TMP/err"; then exit 1; else [ "$?" = 2 ]; fi
+[ ! -s "$TMP/out" ]
 if "$CLI" task fail > "$TMP/out" 2>&1; then exit 1; else [ "$?" = 2 ]; fi
 if grep -q 'synthetic_test_credential' "$TMP/args" "$TMP/out"; then echo 'Credential exposed' >&2; exit 1; fi
 export CLICKUP_WORKSPACE_ID=123
