@@ -291,6 +291,14 @@ printf '\n200\n'
 EOF
 chmod +x "$SCRIPT_BIN/curl" || fail "could not make curl shim executable"
 
+# Never allow an Azure fixture to fall through to the installed real wrapper.
+cat > "$SCRIPT_BIN/gh-auth" <<'EOF'
+#!/bin/bash
+echo 'unexpected GitHub request in Azure fixture' >&2
+exit 99
+EOF
+chmod +x "$SCRIPT_BIN/gh-auth" || fail "could not create GitHub guard"
+
 # shellcheck source=../lib/azure-devops.sh
 source "$HELPER" || fail "could not source shared helper"
 
@@ -528,7 +536,11 @@ for script in "$PR_COMMENTS" "$PR_STATUS"; do
     "$script" 123 > "$TEST_ROOT/$label-non-azure-output" 2>&1
   script_status=$?
   [ "$script_status" -ne 0 ] || fail "$label accepted a non-Azure repository"
-  "$REAL_GREP" -Fq 'Selected Git remote is not a recognized Azure DevOps remote.' "$TEST_ROOT/$label-non-azure-output" || fail "$label did not report the non-Azure origin clearly: $(cat "$TEST_ROOT/$label-non-azure-output")"
+  if [ "$label" = pr-status ]; then
+    "$REAL_GREP" -Fq 'GitHub request failed' "$TEST_ROOT/$label-non-azure-output" || fail "GitHub status did not fail safely through the mock"
+  else
+    "$REAL_GREP" -Fq 'Selected Git remote is not a recognized Azure DevOps remote.' "$TEST_ROOT/$label-non-azure-output" || fail "$label did not report the non-Azure origin clearly"
+  fi
 done
 
 cd "$SCRIPT_REPO" || fail "could not enter valid consumer repository"
@@ -878,17 +890,11 @@ PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" GITHUB_TOKEN=github-pat \
   "$FIXTURE_DOTFILES/scripts/repo" > "$TEST_ROOT/github-output" 2>&1 || fail "GitHub repo lookup failed"
 assert_equal 'https://github.com/example/sample/pull/42' "$(cat "$ADO_TEST_OPEN_FILE")" "GitHub PR browser URL"
 
-# GitHub supports pr open; all other command groups reject the remote without being redirected by AZURE_DEVOPS_ORG.
+# GitHub comments remain unsupported; list/status have their own mock-only suite.
 rm -f "$SCRIPT_URLS_FILE"
-for github_command in list status comments; do
-  case "$github_command" in
-    list) script_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" AZURE_DEVOPS_ORG=redirected-org "$FIXTURE_DOTFILES/scripts/pr" list 2>&1)" ;;
-    status) script_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" AZURE_DEVOPS_ORG=redirected-org "$FIXTURE_DOTFILES/scripts/pr" status 123 2>&1)" ;;
-    comments) script_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" AZURE_DEVOPS_ORG=redirected-org "$FIXTURE_DOTFILES/scripts/pr" comments 123 2>&1)" ;;
-  esac
-  [ "$?" -ne 0 ] || fail "pr $github_command accepted a GitHub remote"
-  "$REAL_GREP" -Fq 'unsupported for GitHub remotes' <<< "$script_output" || fail "pr $github_command did not report GitHub as unsupported"
-done
+script_output="$(PATH="$AZ_BIN:$SCRIPT_BIN:$BASE_BIN" AZURE_DEVOPS_ORG=redirected-org "$FIXTURE_DOTFILES/scripts/pr" comments 123 2>&1)"
+[ "$?" -ne 0 ] || fail "pr comments accepted a GitHub remote"
+"$REAL_GREP" -Fq 'unsupported for GitHub remotes' <<< "$script_output" || fail "pr comments did not report GitHub as unsupported"
 [ ! -s "$SCRIPT_URLS_FILE" ] || fail "unsupported GitHub subcommand made an API request"
 
 # Publish only into shims: no real push, PR creation, or ClickUp writes are made.
